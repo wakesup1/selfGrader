@@ -15,10 +15,15 @@ export default async function ProblemsPage() {
     .returns<Problem[]>();
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-6 py-10">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-zinc-100">Problem Set</h1>
-        <p className="mt-1 text-zinc-400">Pick one problem and submit your best solution.</p>
+    <section style={{ maxWidth: 1200, margin: "0 auto", width: "100%", padding: "40px 48px 80px" }}>
+      <div style={{ marginBottom: 32 }}>
+        <div className="kicker" style={{ marginBottom: 8 }}>the menu · {data?.length ?? 0} items</div>
+        <h1 style={{ fontFamily: "var(--serif)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.025em", margin: 0, color: "var(--ink)" }}>
+          Problems
+        </h1>
+        <p style={{ marginTop: 10, color: "var(--ink-soft)", fontSize: 15 }}>
+          Pick what looks good. Every problem is handcrafted — filter by topic, difficulty, or what you&apos;re in the mood for.
+        </p>
       </div>
       <ProblemList problems={data ?? []} />
     </section>

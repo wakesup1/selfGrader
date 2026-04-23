@@ -85,7 +85,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: testCaseError.message }, { status: 400 });
     }
 
-    return NextResponse.json({ message: "Problem created successfully" });
+    return NextResponse.json({ message: "Problem created successfully", id: problem.id });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Invalid request", issues: error.issues }, { status: 400 });

@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { JUDGE0_LANGUAGE_MAP } from "@/lib/constants";
+import { STATUS_LABEL } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/server";
+import { formatDistanceToNow } from "date-fns";
 
 type SubmissionRow = {
   id: number;
@@ -16,11 +16,15 @@ type SubmissionRow = {
   problems: { title: string } | null;
 };
 
-function statusClass(status: string) {
-  if (status === "AC") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
-  if (status === "WA") return "border-rose-500/40 bg-rose-500/10 text-rose-300";
-  if (status === "TLE") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
-  return "border-zinc-600 bg-zinc-800 text-zinc-300";
+const statusStyle: Record<string, { bg: string; color: string; border: string }> = {
+  AC:  { bg: "var(--sage-bg)",  color: "#5C7558",       border: "#CFD9C7" },
+  WA:  { bg: "var(--clay-bg)",  color: "#8C4B42",       border: "#E3C4BE" },
+  TLE: { bg: "var(--amber-bg)", color: "var(--amber-dark)", border: "#E3CFAE" },
+  CE:  { bg: "#EDE8F5",         color: "#6B4E9E",       border: "#D3C6E8" },
+  RE:  { bg: "#FEF0E6",         color: "#934B1E",       border: "#F0CDB0" },
+};
+function statusChipStyle(status: string) {
+  return statusStyle[status] ?? { bg: "var(--bg-warm)", color: "var(--muted)", border: "var(--kraft-2)" };
 }
 
 export default async function SubmissionsPage() {
@@ -34,33 +38,81 @@ export default async function SubmissionsPage() {
     .returns<SubmissionRow[]>();
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-6 py-10">
-      <h1 className="mb-6 text-3xl font-bold text-zinc-100">Submission History</h1>
-      <Card>
-        <CardHeader>
-          <CardTitle>Latest Submissions</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {(data ?? []).map((submission) => (
+    <section style={{ maxWidth: 1200, margin: "0 auto", width: "100%", padding: "40px 48px 80px" }}>
+      <div style={{ marginBottom: 32 }}>
+        <div className="kicker" style={{ marginBottom: 8 }}>submission history · {data?.length ?? 0} entries</div>
+        <h1 style={{ fontFamily: "var(--serif)", fontSize: 48, lineHeight: 1, letterSpacing: "-0.025em", margin: 0, color: "var(--ink)" }}>
+          Submissions
+        </h1>
+      </div>
+
+      <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
+        {/* Header */}
+        <div style={{
+          display: "grid", gridTemplateColumns: "56px 120px 1fr 80px 72px 64px 110px",
+          gap: 12, padding: "12px 20px",
+          borderBottom: "1px solid var(--line)",
+          fontFamily: "var(--mono)", fontSize: 10.5,
+          letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--muted)",
+        }}>
+          <span>ID</span>
+          <span>User</span>
+          <span>Problem</span>
+          <span>Lang</span>
+          <span>Verdict</span>
+          <span style={{ textAlign: "right" }}>Score</span>
+          <span style={{ textAlign: "right" }}>Time</span>
+        </div>
+
+        {(data ?? []).map((sub, i) => {
+          const chip = statusChipStyle(sub.status);
+          return (
             <Link
-              href={`/submissions/${submission.id}`}
-              key={submission.id}
-              className="grid grid-cols-12 items-center rounded-md border border-zinc-900 p-3 text-sm transition hover:border-zinc-700 hover:bg-zinc-900"
+              key={sub.id}
+              href={`/submissions/${sub.id}`}
+              style={{
+                display: "grid", gridTemplateColumns: "56px 120px 1fr 80px 72px 64px 110px",
+                gap: 12, padding: "14px 20px", alignItems: "center",
+                borderBottom: i < (data ?? []).length - 1 ? "1px solid var(--line-soft)" : "none",
+                textDecoration: "none", color: "inherit", transition: "background 0.1s",
+              }}
+              className="problem-row-hover"
             >
-              <span className="col-span-1 text-zinc-500">#{submission.id}</span>
-              <span className="col-span-3 truncate text-zinc-200">{submission.profiles?.username ?? "unknown"}</span>
-              <span className="col-span-4 truncate text-zinc-300">{submission.problems?.title ?? `Problem ${submission.problem_id}`}</span>
-              <span className="col-span-2 text-zinc-400">
-                {JUDGE0_LANGUAGE_MAP[submission.language_id as 54 | 62 | 71]?.label ?? submission.language_id}
+              <span style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--muted-2)" }}>#{sub.id}</span>
+              <span style={{ fontSize: 13.5, fontWeight: 500, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {sub.profiles?.username ?? "—"}
               </span>
-              <span className="col-span-1">
-                <Badge className={statusClass(submission.status)}>{submission.status}</Badge>
+              <span style={{ fontSize: 13.5, color: "var(--ink-soft)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {sub.problems?.title ?? `Problem ${sub.problem_id}`}
               </span>
-              <span className="col-span-1 text-right text-cyan-300">{submission.score}</span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--muted)" }}>
+                {JUDGE0_LANGUAGE_MAP[sub.language_id as 54 | 62 | 71]?.label ?? sub.language_id}
+              </span>
+              <span style={{
+                display: "inline-flex", alignItems: "center",
+                padding: "3px 8px", borderRadius: 999,
+                fontFamily: "var(--mono)", fontSize: 10.5,
+                background: chip.bg, color: chip.color, border: `1px solid ${chip.border}`,
+                width: "fit-content",
+              }}>
+                {STATUS_LABEL[sub.status] ?? sub.status}
+              </span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600, color: "var(--clay)", textAlign: "right" }}>
+                {sub.score}
+              </span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--muted-2)", textAlign: "right" }}>
+                {formatDistanceToNow(new Date(sub.created_at), { addSuffix: true })}
+              </span>
             </Link>
-          ))}
-        </CardContent>
-      </Card>
+          );
+        })}
+
+        {(data ?? []).length === 0 && (
+          <p style={{ padding: "48px 24px", textAlign: "center", fontSize: 14, color: "var(--muted)", fontFamily: "var(--mono)" }}>
+            No submissions yet.
+          </p>
+        )}
+      </div>
     </section>
   );
 }

@@ -3,9 +3,6 @@
 import { type FormEvent, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 
 type Mode = "login" | "signup";
 
@@ -22,159 +19,144 @@ export function AuthForm() {
   const mode: Mode = selectedMode ?? queryMode;
 
   function validateInputs() {
-    if (!email.trim()) {
-      return "Email is required.";
-    }
-
-    if (!password) {
-      return "Password is required.";
-    }
-
+    if (!email.trim()) return "Email is required.";
+    if (!password) return "Password is required.";
     if (mode === "signup") {
-      const normalizedUsername = username.trim();
-
-      if (normalizedUsername.length < 3) {
-        return "Username must be at least 3 characters.";
-      }
-
-      if (password.length < 6) {
-        return "Password must be at least 6 characters.";
-      }
+      if (username.trim().length < 3) return "Username must be at least 3 characters.";
+      if (password.length < 6) return "Password must be at least 6 characters.";
     }
-
     return null;
   }
 
   async function submit() {
     const supabase = createClient();
-
     setLoading(true);
     setMessage("");
 
     try {
-      const validationError = validateInputs();
-      if (validationError) {
-        setMessage(validationError);
-        return;
-      }
+      const err = validateInputs();
+      if (err) { setMessage(err); return; }
 
       if (mode === "signup") {
-        const normalizedUsername = username.trim();
-
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: {
-            data: { username: normalizedUsername },
-          },
+          options: { data: { username: username.trim() } },
         });
-
-        if (error) {
-          setMessage(error.message);
-          return;
-        }
-
-        if (data.session) {
-          router.push("/problems");
-          router.refresh();
-          return;
-        }
-
+        if (error) { setMessage(error.message); return; }
+        if (data.session) { router.push("/problems"); router.refresh(); return; }
         setSelectedMode("login");
-        setMessage("Account created. Please check your email for confirmation if enabled, then login.");
+        setMessage("Account created. Log in to continue.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-        if (error) {
-          setMessage(error.message);
-          return;
-        }
-
+        if (error) { setMessage(error.message); return; }
         router.push("/problems");
         router.refresh();
       }
     } catch (error) {
-      const fallback = "Cannot connect to authentication service. Please check Supabase settings and try again.";
-      if (error instanceof Error && error.message) {
-        setMessage(error.message);
-      } else {
-        setMessage(fallback);
-      }
+      setMessage(error instanceof Error ? error.message : "Cannot connect to authentication service.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (loading) return;
-    await submit();
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!loading) await submit();
   }
 
+  const inputStyle = {
+    width: "100%", padding: "11px 14px",
+    border: "1px solid var(--line)", borderRadius: 8,
+    background: "var(--surface)", fontSize: 14,
+    fontFamily: "var(--sans)", color: "var(--ink)",
+    outline: "none", transition: "border-color 0.15s",
+  };
+
   return (
-    <Card className="mx-auto w-full max-w-md">
-      <CardHeader>
-        <div className="mb-3 grid grid-cols-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-1">
-          <Button
+    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 14, padding: "28px 28px 24px", boxShadow: "var(--shadow)" }}>
+      {/* Mode toggle */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, background: "var(--bg-warm)", borderRadius: 10, padding: 4, marginBottom: 24 }}>
+        {(["login", "signup"] as const).map((m) => (
+          <button
+            key={m}
             type="button"
-            variant={mode === "login" ? "default" : "ghost"}
-            className="h-9"
-            onClick={() => setSelectedMode("login")}
+            onClick={() => setSelectedMode(m)}
+            style={{
+              padding: "8px", borderRadius: 8, fontSize: 13.5, fontWeight: 500,
+              background: mode === m ? "var(--surface)" : "transparent",
+              color: mode === m ? "var(--ink)" : "var(--muted)",
+              boxShadow: mode === m ? "var(--shadow-sm)" : "none",
+              border: "none", cursor: "pointer", transition: "all 0.15s",
+              fontFamily: "var(--sans)",
+            }}
           >
-            Login
-          </Button>
-          <Button
-            type="button"
-            variant={mode === "signup" ? "default" : "ghost"}
-            className="h-9"
-            onClick={() => setSelectedMode("signup")}
-          >
-            Sign up
-          </Button>
-        </div>
-        <CardTitle>{mode === "login" ? "Login" : "Create account"}</CardTitle>
-        <CardDescription>
-          Use Supabase Auth with email and password.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form className="space-y-4" onSubmit={onSubmit}>
-          {mode === "signup" && (
-            <Input
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              placeholder="Username"
-              autoComplete="username"
-              required
-              minLength={3}
-            />
-          )}
-          <Input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="Email"
-            autoComplete="email"
+            {m === "login" ? "Login" : "Sign up"}
+          </button>
+        ))}
+      </div>
+
+      {/* Title */}
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ fontFamily: "var(--serif)", fontSize: 22, color: "var(--ink)", margin: "0 0 4px", fontWeight: 400 }}>
+          {mode === "login" ? "Welcome back" : "Create account"}
+        </h2>
+        <p style={{ fontSize: 13.5, color: "var(--muted)", margin: 0 }}>
+          {mode === "login" ? "Sign in to your nograder account." : "Join nograder with email and password."}
+        </p>
+      </div>
+
+      <form style={{ display: "flex", flexDirection: "column", gap: 12 }} onSubmit={onSubmit}>
+        {mode === "signup" && (
+          <input
+            style={inputStyle}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Username"
+            autoComplete="username"
             required
+            minLength={3}
           />
-          <Input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Password"
-            autoComplete={mode === "login" ? "current-password" : "new-password"}
-            required
-            minLength={6}
-          />
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Working..." : mode === "login" ? "Login" : "Sign up"}
-          </Button>
-          <p className="text-center text-sm text-zinc-400">
-            {mode === "login" ? "New here? Choose Sign up tab." : "Already have an account? Choose Login tab."}
+        )}
+        <input
+          style={inputStyle}
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Email"
+          autoComplete="email"
+          required
+        />
+        <input
+          style={inputStyle}
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password"
+          autoComplete={mode === "login" ? "current-password" : "new-password"}
+          required
+          minLength={6}
+        />
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            width: "100%", padding: "11px",
+            background: "var(--ink)", color: "var(--bg)",
+            borderRadius: 999, fontSize: 14, fontWeight: 500,
+            border: "none", cursor: loading ? "not-allowed" : "pointer",
+            opacity: loading ? 0.7 : 1, transition: "all 0.15s",
+            fontFamily: "var(--sans)", marginTop: 4,
+          }}
+        >
+          {loading ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
+        </button>
+        {message && (
+          <p style={{ fontSize: 13, color: "var(--clay)", margin: 0, textAlign: "center" }}>
+            {message}
           </p>
-          {message ? <p className="text-sm text-zinc-300">{message}</p> : null}
-        </form>
-      </CardContent>
-    </Card>
+        )}
+      </form>
+    </div>
   );
 }

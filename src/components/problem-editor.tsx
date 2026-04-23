@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Editor from "@monaco-editor/react";
 import { JUDGE0_LANGUAGE_MAP, STARTER_CODE } from "@/lib/constants";
-import { Button } from "@/components/ui/button";
+import { STATUS_LABEL } from "@/lib/utils";
 import { Play, Terminal as TerminalIcon } from "lucide-react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -22,6 +22,14 @@ const languageOptions = Object.entries(JUDGE0_LANGUAGE_MAP).map(([id, value]) =>
   ...value,
 }));
 
+const verdictColor: Record<string, string> = {
+  AC:  "#8FA88C",
+  WA:  "var(--clay)",
+  TLE: "var(--amber)",
+  CE:  "#A87EC8",
+  RE:  "#C89B6B",
+};
+
 export function ProblemEditor({ problemId }: { problemId: number }) {
   const [languageId, setLanguageId] = useState(71);
   const [code, setCode] = useState(STARTER_CODE[71]);
@@ -29,7 +37,10 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  const monacoLanguage = useMemo(() => JUDGE0_LANGUAGE_MAP[languageId as 54 | 62 | 71].monaco, [languageId]);
+  const monacoLanguage = useMemo(
+    () => JUDGE0_LANGUAGE_MAP[languageId as 54 | 62 | 71].monaco,
+    [languageId],
+  );
 
   async function onSubmit() {
     setLoading(true);
@@ -44,133 +55,158 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
 
       if (!response.ok) {
         if (response.status === 503) {
-          alert("⚠️ Judge0 Server is offline or unreachable. Please try again later.");
+          alert("Judge0 server is offline or unreachable. Please try again later.");
         } else {
-          alert("⚠️ Failed to submit code. Server responded with error.");
+          alert("Failed to submit. Server responded with an error.");
         }
       }
 
       const data = (await response.json()) as SubmitResponse;
       setResult(data);
-      router.refresh(); // Refresh to update Dashboard submissions table
+      router.refresh();
     } catch {
-      alert("⚠️ Network Error: Unable to reach the grading server.");
+      alert("Network error: unable to reach the grading server.");
       setResult({ status: "ERR", score: 0, passed: 0, total: 0, message: "Unexpected error" });
     } finally {
       setLoading(false);
     }
   }
 
+  const vColor = result ? (verdictColor[result.status] ?? "var(--muted)") : "var(--muted)";
+
   return (
-    <div className="flex h-[80vh] flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-950 shadow-xl">
+    <div style={{
+      display: "flex", flexDirection: "column",
+      height: "100%", minHeight: "78vh",
+      overflow: "hidden", borderRadius: 14,
+      border: "1px solid var(--line)", boxShadow: "var(--shadow-sm)",
+    }}>
       {/* Toolbar */}
-      <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950 px-4 py-3">
-        <div className="flex items-center gap-3">
-          <select
-            value={languageId}
-            onChange={(event) => {
-              const selected = Number(event.target.value);
-              setLanguageId(selected);
-              setCode(STARTER_CODE[selected]);
-            }}
-            className="h-9 rounded-md border border-slate-700 bg-slate-900 px-3 text-sm text-slate-200 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-          >
-            {languageOptions.map((language) => (
-              <option key={language.id} value={language.id}>
-                {language.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <Button
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        borderBottom: "1px solid var(--line)",
+        background: "var(--surface)", padding: "10px 16px",
+      }}>
+        <select
+          value={languageId}
+          onChange={(e) => {
+            const sel = Number(e.target.value);
+            setLanguageId(sel);
+            setCode(STARTER_CODE[sel]);
+          }}
+          style={{
+            height: 32, borderRadius: 6,
+            border: "1px solid var(--line)", background: "var(--surface)",
+            padding: "0 10px", fontSize: 12.5,
+            fontFamily: "var(--mono)", color: "var(--ink-soft)", cursor: "pointer",
+          }}
+        >
+          {languageOptions.map((lang) => (
+            <option key={lang.id} value={lang.id}>{lang.label}</option>
+          ))}
+        </select>
+
+        <button
           onClick={onSubmit}
           disabled={loading}
-          className="bg-blue-600 font-semibold text-white hover:bg-blue-700"
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            padding: "7px 16px",
+            background: loading ? "var(--ink-soft)" : "var(--ink)",
+            color: "var(--bg)", borderRadius: 999,
+            fontSize: 12.5, fontWeight: 500, fontFamily: "var(--sans)",
+            border: "none", cursor: loading ? "not-allowed" : "pointer",
+            transition: "all 0.15s",
+          }}
         >
           {loading ? (
             <>
-              <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-              Running...
+              <span style={{ width: 12, height: 12, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "white", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+              Brewing…
             </>
           ) : (
             <>
-              <Play className="mr-1.5 h-4 w-4 fill-current" />
-              Run Code
+              <Play style={{ width: 12, height: 12, fill: "currentColor" }} />
+              Submit & brew
             </>
           )}
-        </Button>
+        </button>
       </div>
 
-      {/* Split Screen */}
+      {/* Editor + Console */}
       <ResizablePanelGroup className="flex-1">
-        {/* Editor Panel */}
-        <ResizablePanel defaultSize={60} minSize={30}>
+        <ResizablePanel defaultSize={62} minSize={30}>
           <Editor
             theme="vs-dark"
             language={monacoLanguage}
             value={code}
-            onChange={(value) => setCode(value ?? "")}
+            onChange={(v) => setCode(v ?? "")}
             options={{
               minimap: { enabled: false },
-              fontSize: 14,
-              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-              padding: { top: 16 },
+              fontSize: 13,
+              fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace",
+              padding: { top: 14 },
               scrollBeyondLastLine: false,
               automaticLayout: true,
+              lineNumbersMinChars: 3,
             }}
           />
         </ResizablePanel>
 
-        <ResizableHandle withHandle className="bg-slate-800" />
+        <ResizableHandle style={{ background: "var(--line)", width: 1 }} className="hover:bg-amber-300 transition-colors" />
 
-        {/* Console Panel */}
-        <ResizablePanel defaultSize={40} minSize={20} className="flex flex-col bg-black">
-          <div className="flex items-center gap-2 border-b border-slate-800 bg-slate-900/50 px-4 py-2 text-xs font-semibold tracking-wider text-slate-400">
-            <TerminalIcon className="h-4 w-4" />
-            CONSOLE
+        <ResizablePanel defaultSize={38} minSize={20} className="flex flex-col" style={{ background: "var(--ink-bg)" }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            borderBottom: "1px solid rgba(255,255,255,0.07)",
+            padding: "10px 16px",
+            fontFamily: "var(--mono)", fontSize: 10.5,
+            letterSpacing: "0.2em", textTransform: "uppercase", color: "#5A6456",
+          }}>
+            <TerminalIcon style={{ width: 13, height: 13 }} />
+            OUTPUT
           </div>
-          <ScrollArea className="flex-1 p-4 font-mono text-sm leading-relaxed">
+          <ScrollArea className="flex-1 p-4 font-mono text-xs leading-relaxed">
             {!result && !loading && (
-              <div className="text-slate-500">Ready to run. Output will appear here...</div>
+              <span style={{ color: "#4A5448", fontFamily: "var(--mono)", fontSize: 12.5 }}>
+                Submit your code to see tasting notes.
+              </span>
             )}
-            
+
             {loading && (
-              <div className="animate-pulse text-blue-400">Executing...</div>
+              <span style={{ color: "var(--amber)", fontFamily: "var(--mono)", fontSize: 12.5 }}>
+                Brewing… ☕
+              </span>
             )}
 
             {result && !loading && (
-              <div className="space-y-4">
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div>
-                  <span className="font-bold text-slate-400">Verdict: </span>
-                  <span
-                    className={`font-black ${
-                      result.status === "AC"
-                        ? "text-green-500"
-                        : result.status === "ERR" || result.status === "JUDGE0_OFFLINE"
-                          ? "text-red-500"
-                          : "text-amber-500" // WA, TLE, etc.
-                    }`}
-                  >
-                    {result.status}
+                  <span style={{ color: "#4A5448", fontFamily: "var(--mono)", fontSize: 11 }}>VERDICT  </span>
+                  <span style={{ fontWeight: 600, color: vColor, fontFamily: "var(--mono)" }}>
+                    {STATUS_LABEL[result.status] ?? result.status}
                   </span>
                 </div>
-                
                 <div>
-                  <span className="font-bold text-slate-400">Score: </span>
-                  <span className="text-blue-400">{result.score}</span>
+                  <span style={{ color: "#4A5448", fontFamily: "var(--mono)", fontSize: 11 }}>SCORE    </span>
+                  <span style={{ color: "var(--amber)", fontFamily: "var(--mono)" }}>{result.score}</span>
                 </div>
-                
                 <div>
-                  <span className="font-bold text-slate-400">Test Cases Passed: </span>
-                  <span className="text-slate-300">
-                    {result.passed} / {result.total}
-                  </span>
+                  <span style={{ color: "#4A5448", fontFamily: "var(--mono)", fontSize: 11 }}>CASES    </span>
+                  <span style={{ color: "#D8D2C2", fontFamily: "var(--mono)" }}>{result.passed} / {result.total}</span>
                 </div>
-
                 {result.message && (
-                  <div className="mt-4 rounded-md bg-red-500/10 p-3 text-red-400 border border-red-500/20">
-                    <div className="mb-1 font-bold">Error Output:</div>
-                    <pre className="whitespace-pre-wrap font-mono text-xs">{result.message}</pre>
+                  <div style={{
+                    marginTop: 4, borderRadius: 8,
+                    background: "rgba(184,104,94,0.12)", border: "1px solid rgba(184,104,94,0.2)",
+                    padding: "12px 14px",
+                  }}>
+                    <p style={{ marginBottom: 6, fontSize: 11, fontWeight: 500, color: "#C87B72", fontFamily: "var(--mono)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                      Error
+                    </p>
+                    <pre style={{ whiteSpace: "pre-wrap", color: "rgba(200,140,134,0.85)", fontSize: 12, margin: 0, fontFamily: "var(--mono)" }}>
+                      {result.message}
+                    </pre>
                   </div>
                 )}
               </div>
@@ -178,6 +214,8 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
           </ScrollArea>
         </ResizablePanel>
       </ResizablePanelGroup>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

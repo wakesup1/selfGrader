@@ -24,3 +24,25 @@ export function createSlug(title: string): string {
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-");
 }
+
+const STATUS_BADGE: Record<string, string> = {
+  AC:  "border-emerald-200 bg-emerald-50 text-emerald-700",
+  WA:  "border-red-200     bg-red-50     text-red-700",
+  TLE: "border-amber-200   bg-amber-50   text-amber-700",
+  CE:  "border-purple-200  bg-purple-50  text-purple-700",
+  RE:  "border-orange-200  bg-orange-50  text-orange-700",
+};
+
+export function statusBadgeClass(status: string): string {
+  return STATUS_BADGE[status] ?? "border-stone-200 bg-stone-100 text-stone-600";
+}
+
+export const STATUS_LABEL: Record<string, string> = {
+  AC:             "Accepted",
+  WA:             "Wrong Answer",
+  TLE:            "Time Limit Exceeded",
+  CE:             "Compilation Error",
+  RE:             "Runtime Error",
+  ERR:            "Error",
+  JUDGE0_OFFLINE: "Judge Offline",
+};

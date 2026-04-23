@@ -151,22 +151,26 @@ export async function POST(request: Request) {
 
     const admin = createAdminClient();
 
-    const { data: problem, error: problemError } = await admin
-      .from("problems")
-      .select("id, points, time_limit, memory_limit")
-      .eq("id", body.problemId)
-      .single<Pick<Problem, "id" | "points" | "time_limit" | "memory_limit">>();
+    const [
+      { data: problem, error: problemError },
+      { data: testCases, error: testCaseError },
+    ] = await Promise.all([
+      admin
+        .from("problems")
+        .select("id, points, time_limit, memory_limit")
+        .eq("id", body.problemId)
+        .single<Pick<Problem, "id" | "points" | "time_limit" | "memory_limit">>(),
+      admin
+        .from("test_cases")
+        .select("id, input, expected_output")
+        .eq("problem_id", body.problemId)
+        .order("id", { ascending: true })
+        .returns<Pick<TestCase, "id" | "input" | "expected_output">[]>(),
+    ]);
 
     if (problemError || !problem) {
       return NextResponse.json({ error: "Problem not found" }, { status: 404 });
     }
-
-    const { data: testCases, error: testCaseError } = await admin
-      .from("test_cases")
-      .select("id, input, expected_output")
-      .eq("problem_id", body.problemId)
-      .order("id", { ascending: true })
-      .returns<Pick<TestCase, "id" | "input" | "expected_output">[]>();
 
     if (testCaseError || !testCases || testCases.length === 0) {
       return NextResponse.json({ error: "No test cases configured for this problem" }, { status: 400 });

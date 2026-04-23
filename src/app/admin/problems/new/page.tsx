@@ -30,8 +30,7 @@ export default async function NewProblemPage() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-3xl px-6 py-10">
-      <h1 className="mb-6 text-3xl font-bold text-zinc-100">Admin Dashboard</h1>
+    <section className="mx-auto w-full max-w-4xl px-6 py-10">
       <AdminProblemForm />
     </section>
   );
