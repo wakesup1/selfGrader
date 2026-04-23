@@ -6,6 +6,7 @@ create table if not exists public.profiles (
   username text unique not null check (char_length(username) between 3 and 30),
   total_score integer not null default 0,
   solved_count integer not null default 0,
+  is_admin boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -13,21 +14,53 @@ create table if not exists public.profiles (
 create table if not exists public.problems (
   id bigserial primary key,
   title text not null,
+  slug text unique,
   description text not null,
+  constraints text not null default '',
+  difficulty text not null default 'Easy' check (difficulty in ('Easy', 'Medium', 'Hard')),
   points integer not null default 100 check (points > 0),
   time_limit integer not null default 2,      -- seconds
   memory_limit integer not null default 256,  -- MB
+  is_published boolean not null default true,
+  created_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
--- Hidden test cases used for grading
+-- Hidden + sample test cases used for grading
 create table if not exists public.test_cases (
   id bigserial primary key,
   problem_id bigint not null references public.problems(id) on delete cascade,
   input text not null default '',
   expected_output text not null,
+  is_sample boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+-- Keep older databases compatible with current app schema
+alter table public.profiles add column if not exists is_admin boolean not null default false;
+
+alter table public.problems add column if not exists slug text;
+alter table public.problems add column if not exists constraints text not null default '';
+alter table public.problems add column if not exists difficulty text not null default 'Easy';
+alter table public.problems add column if not exists is_published boolean not null default true;
+alter table public.problems add column if not exists created_by uuid references public.profiles(id) on delete set null;
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'problems_difficulty_check'
+      and conrelid = 'public.problems'::regclass
+  ) then
+    alter table public.problems
+      add constraint problems_difficulty_check
+      check (difficulty in ('Easy', 'Medium', 'Hard'));
+  end if;
+end $$;
+
+create unique index if not exists problems_slug_key on public.problems(slug);
+
+alter table public.test_cases add column if not exists is_sample boolean not null default false;
 
 -- Every code submission (includes runtime and memory)
 create table if not exists public.submissions (
@@ -129,7 +162,9 @@ using (true);
 
 create policy "problems readable"
 on public.problems for select
-using (true);
+using (is_published = true or exists (
+  select 1 from public.profiles p where p.id = auth.uid() and p.is_admin = true
+));
 
 create policy "submissions readable"
 on public.submissions for select

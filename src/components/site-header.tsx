@@ -40,9 +40,14 @@ export async function SiteHeader() {
               </Button>
             </form>
           ) : (
-            <Link href="/auth">
-              <Button className="ml-1">Login</Button>
-            </Link>
+            <div className="ml-1 flex items-center gap-2">
+              <Link href="/auth?mode=login">
+                <Button variant="outline">Login</Button>
+              </Link>
+              <Link href="/auth?mode=signup">
+                <Button>Sign up</Button>
+              </Link>
+            </div>
           )}
         </nav>
       </div>
