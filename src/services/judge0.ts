@@ -73,7 +73,7 @@ function baseUrl(): string {
 function headers(): HeadersInit {
   return {
     "Content-Type": "application/json",
-    "X-Auth-Token": "nograder69", 
+    "X-Auth-Token": process.env.AUTHN_TOKEN!, 
   };
 }
 
