@@ -24,6 +24,7 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
   const [code, setCode] = useState(STARTER_CODE[71]);
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
   const [tcStates, setTcStates] = useState<TcState[]>([]);
   const [animating, setAnimating] = useState(false);
   // Fake execution times generated once per submission — stable across re-renders.
@@ -82,6 +83,17 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
       });
 
       if (!response.ok) {
+        if (response.status === 429) {
+          const retryAfter = Number(response.headers.get("Retry-After") ?? "60");
+          setCooldown(retryAfter);
+          const timer = setInterval(() => {
+            setCooldown((prev) => {
+              if (prev <= 1) { clearInterval(timer); return 0; }
+              return prev - 1;
+            });
+          }, 1_000);
+          return;
+        }
         const data = await response.json().catch(() => ({})) as { message?: string };
         if (response.status === 401) {
           alert("Please sign in to submit your solution.");
@@ -187,10 +199,15 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
             <button
               className="btn btn-sage"
               onClick={onSubmit}
-              disabled={loading || animating}
+              disabled={loading || animating || cooldown > 0}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
             >
-              {loading ? (
+              {cooldown > 0 ? (
+                <>
+                  <IconSteeping size={13} />
+                  Wait {cooldown}s…
+                </>
+              ) : loading ? (
                 <>
                   <IconSteeping size={13} />
                   Brewing…

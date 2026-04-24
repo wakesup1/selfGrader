@@ -10,6 +10,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { gradeSubmission, recordOfflineSubmission } from "@/services/grading";
+import { ratelimit, getClientIp } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,18 @@ const schema = z.object({
 });
 
 export async function POST(request: Request) {
-  // 1. Parse & validate
+  // 1. Rate limit — 5 submissions / IP / 60-second sliding window
+  const ip = getClientIp(request);
+  const { success, reset } = await ratelimit.limit(ip);
+  if (!success) {
+    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1_000));
+    return NextResponse.json(
+      { error: "Too many submissions. Please wait before trying again." },
+      { status: 429, headers: { "Retry-After": String(retryAfter) } }
+    );
+  }
+
+  // 2. Parse & validate
   let body: z.infer<typeof schema>;
   try {
     body = schema.parse(await request.json());
@@ -31,7 +43,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
 
-  // 2. Auth
+  // 3. Auth
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
