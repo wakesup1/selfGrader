@@ -6,8 +6,10 @@ const nextConfig: NextConfig = {
 
   // Allow Server Actions (signOut, etc.) from the production domain via Cloudflare Tunnel.
   // Without this, Next.js CSRF check compares origin vs x-forwarded-host and blocks the action.
-  serverActions: {
-    allowedOrigins: ['web.nograder.dev'],
+  experimental: {
+    serverActions: {
+      allowedOrigins: ['web.nograder.dev'],
+    },
   },
 
   images: {
