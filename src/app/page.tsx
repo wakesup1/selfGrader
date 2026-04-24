@@ -1,82 +1,118 @@
-import Link from "next/link";
-import { ArrowRight, Trophy, Code2, ScrollText } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { ProblemsTableFull } from "@/components/problems-table-full";
+import { DashboardHero } from "@/components/dashboard-hero";
+import { DashboardSubmitBox } from "@/components/dashboard-submit-box";
+import { AnnouncementBoard, type Announcement } from "@/components/announcement-board";
+import { LandingPage } from "@/components/landing-page";
+import type { Problem } from "@/lib/types";
 
-export default function Home() {
+type UserStat = { problem_id: number; best_score: number; is_solved: boolean };
+
+export type ProblemWithStat = Problem & { userStat: { best_score: number; is_solved: boolean } | null };
+
+export default async function Home() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  // Show landing page for logged-out visitors
+  if (!user) {
+    const [{ data: landingProblems, count: problemCount }, { count: userCount }] = await Promise.all([
+      supabase
+        .from("problems")
+        .select("id, title, difficulty, points", { count: "exact" })
+        .eq("is_published", true)
+        .order("id", { ascending: true })
+        .limit(12)
+        .returns<{ id: number; title: string; difficulty: string; points: number }[]>(),
+      supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true }),
+    ]);
+    return (
+      <LandingPage
+        problems={landingProblems ?? []}
+        problemCount={problemCount ?? 0}
+        userCount={userCount ?? 0}
+      />
+    );
+  }
+
+  let username: string | null = null;
+  let solvedCount = 0;
+  let totalScore = 0;
+  let isAdmin = false;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("username, solved_count, total_score, is_admin")
+    .eq("id", user.id)
+    .single<{ username: string; solved_count: number; total_score: number; is_admin: boolean }>();
+  username    = profile?.username    ?? null;
+  solvedCount = profile?.solved_count ?? 0;
+  totalScore  = profile?.total_score  ?? 0;
+  isAdmin     = profile?.is_admin     ?? false;
+
+  const [{ data: problems }, { data: userStats }, { data: announcements }] = await Promise.all([
+    supabase
+      .from("problems")
+      .select("id, title, slug, difficulty, points, time_limit, memory_limit, is_published, description, constraints, pdf_url, created_at")
+      .eq("is_published", true)
+      .order("id", { ascending: true })
+      .returns<Problem[]>(),
+    supabase
+      .from("user_problem_stats")
+      .select("problem_id, best_score, is_solved")
+      .eq("user_id", user.id)
+      .returns<UserStat[]>(),
+    // Admins see drafts too so they can preview before publishing
+    isAdmin
+      ? supabase
+          .from("announcements")
+          .select("id, tag, title, body, pinned, is_published, updated_at")
+          .order("pinned",     { ascending: false })
+          .order("updated_at", { ascending: false })
+          .returns<Announcement[]>()
+      : supabase
+          .from("announcements")
+          .select("id, tag, title, body, pinned, is_published, updated_at")
+          .eq("is_published", true)
+          .order("pinned",     { ascending: false })
+          .order("updated_at", { ascending: false })
+          .returns<Announcement[]>(),
+  ]);
+
+  const statsMap = new Map<number, UserStat>();
+  userStats?.forEach((s) => statsMap.set(s.problem_id, s));
+
+  const problemsWithStats: ProblemWithStat[] = (problems ?? []).map((p) => ({
+    ...p,
+    userStat: statsMap.get(p.id) ?? null,
+  }));
+
   return (
-    <section style={{ maxWidth: 1200, margin: "0 auto", width: "100%", padding: "56px 48px 80px" }}>
+    <div className="page">
       {/* Hero */}
-      <div style={{ marginBottom: 56 }}>
-        <div className="kicker" style={{ marginBottom: 16 }}>Online Judge Platform · Powered by Judge0</div>
-        <h1 style={{
-          fontFamily: "var(--serif)",
-          fontSize: "clamp(44px, 6vw, 72px)",
-          lineHeight: 1.05,
-          letterSpacing: "-0.025em",
-          color: "var(--ink)",
-          margin: "0 0 20px",
-          maxWidth: 680,
-        }}>
-          Practice. Submit.<br />Climb the board.
-        </h1>
-        <p style={{ color: "var(--ink-soft)", fontSize: 16, maxWidth: 480, lineHeight: 1.7, margin: "0 0 32px" }}>
-          Self-hosted grader with instant verdicts, score tracking, and a leaderboard for your group.
-        </p>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <Link href="/problems" style={{
-            display: "inline-flex", alignItems: "center", gap: 8,
-            padding: "11px 22px",
-            background: "var(--ink)", color: "var(--bg)",
-            borderRadius: 999, fontSize: 14, fontWeight: 500,
-            textDecoration: "none", transition: "all 0.15s",
-          }}>
-            Browse Problems <ArrowRight style={{ width: 15, height: 15 }} />
-          </Link>
-          <Link href="/auth" style={{
-            display: "inline-flex", alignItems: "center",
-            padding: "11px 22px",
-            border: "1px solid var(--line)", color: "var(--ink)",
-            borderRadius: 999, fontSize: 14,
-            textDecoration: "none", transition: "all 0.15s",
-          }}>
-            Login / Sign up
-          </Link>
-        </div>
+      <DashboardHero
+        username={username}
+        solvedCount={solvedCount}
+        totalScore={totalScore}
+        isLoggedIn={!!user}
+      />
+
+      {/* Submit box */}
+      <div style={{ marginBottom: 28 }}>
+        <DashboardSubmitBox problems={problemsWithStats} isLoggedIn={!!user} />
       </div>
 
-      {/* Feature cards */}
-      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-        <FeatureCard
-          icon={<Code2 style={{ width: 20, height: 20, color: "var(--clay)" }} />}
-          title="Problem Set"
-          body="Browse problems with points, time limits, and difficulty levels."
-        />
-        <FeatureCard
-          icon={<ScrollText style={{ width: 20, height: 20, color: "var(--clay)" }} />}
-          title="Submissions"
-          body="See every attempt, inspect source code, and compare strategies."
-        />
-        <FeatureCard
-          icon={<Trophy style={{ width: 20, height: 20, color: "var(--clay)" }} />}
-          title="Leaderboard"
-          body="Track total score and solved counts in your group hall of fame."
+      {/* Main grid: problems table + announcements */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 28, alignItems: "start" }}>
+        <ProblemsTableFull problems={problemsWithStats} isLoggedIn={!!user} />
+
+        <AnnouncementBoard
+          initial={announcements ?? []}
+          isAdmin={isAdmin}
         />
       </div>
-    </section>
-  );
-}
-
-function FeatureCard({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
-  return (
-    <div style={{
-      background: "var(--surface)",
-      border: "1px solid var(--line)",
-      borderRadius: 14,
-      padding: "24px 24px 22px",
-      boxShadow: "var(--shadow-sm)",
-    }}>
-      <div style={{ marginBottom: 14 }}>{icon}</div>
-      <h3 style={{ fontFamily: "var(--serif)", fontSize: 20, color: "var(--ink)", margin: "0 0 8px", fontWeight: 400 }}>{title}</h3>
-      <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.65, margin: 0 }}>{body}</p>
     </div>
   );
 }

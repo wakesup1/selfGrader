@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Plus, Pencil } from "lucide-react";
+import { IconPlus, IconEdit } from "@/components/icons";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -54,7 +54,7 @@ export default async function AdminProblemsPage() {
           borderRadius: 999, fontSize: 13.5, fontWeight: 500,
           textDecoration: "none", transition: "all 0.15s", whiteSpace: "nowrap",
         }}>
-          <Plus style={{ width: 15, height: 15 }} /> New Problem
+          <IconPlus size={15} /> New Problem
         </Link>
       </div>
 
@@ -109,7 +109,7 @@ export default async function AdminProblemsPage() {
                   color: "var(--ink-soft)", textDecoration: "none",
                   fontFamily: "var(--mono)",
                 }}>
-                  <Pencil style={{ width: 10, height: 10 }} /> Edit
+                  <IconEdit size={10} /> Edit
                 </Link>
               </div>
             </div>

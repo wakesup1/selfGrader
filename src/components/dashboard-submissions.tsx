@@ -1,32 +1,72 @@
-import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
-import { STATUS_LABEL } from "@/lib/utils";
-import { formatDistanceToNow } from "date-fns";
+"use client";
 
-const statusColor: Record<string, string> = {
-  AC:  "#5C7558", WA: "#8C4B42", TLE: "var(--amber-dark)",
-  CE:  "#6B4E9E", RE: "#934B1E",
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { STATUS_LABEL } from "@/lib/utils";
+import { RelativeTime } from "@/components/relative-time";
+import { IconBrewed, IconBurnt, IconSteeping, IconTimeout, IconSpilled, IconCompileErr } from "@/components/icons";
+
+type SubmissionRow = {
+  id: number;
+  status: string;
+  score: number;
+  execution_time: number | null;
+  memory: number | null;
+  created_at: string;
+  language_id: number;
 };
 
-export async function DashboardSubmissions({ problemId }: { problemId: number }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+const statusColor: Record<string, string> = {
+  AC:  "#5C7558",
+  WA:  "#8C4B42",
+  TLE: "var(--amber-dark)",
+  CE:  "#6B4E9E",
+  RE:  "#934B1E",
+};
 
-  if (!user) {
+function VerdictIcon({ status }: { status: string }) {
+  if (status === "AC")  return <IconBrewed size={11} />;
+  if (status === "WA")  return <IconBurnt size={11} />;
+  if (status === "TLE") return <IconTimeout size={11} />;
+  if (status === "CE")  return <IconCompileErr size={11} />;
+  if (status === "RE")  return <IconSpilled size={11} />;
+  return <IconSteeping size={11} />;
+}
+
+export function DashboardSubmissions({ problemId }: { problemId: number }) {
+  const [submissions, setSubmissions] = useState<SubmissionRow[] | null>(null);
+  const [isGuest, setIsGuest] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/my-submissions?problemId=${problemId}`)
+      .then((r) => r.json())
+      .then(({ submissions: rows }) => {
+        if (rows === null) {
+          setIsGuest(true);
+        } else {
+          setSubmissions(rows);
+        }
+      })
+      .catch(() => setSubmissions([]))
+      .finally(() => setLoading(false));
+  }, [problemId]);
+
+  if (loading) {
+    return (
+      <div style={{ padding: "32px 16px", textAlign: "center", fontSize: 13, color: "var(--muted)", fontFamily: "var(--mono)" }}>
+        Loading…
+      </div>
+    );
+  }
+
+  if (isGuest) {
     return (
       <div style={{ padding: "32px 16px", textAlign: "center", fontSize: 13.5, color: "var(--muted)" }}>
         <Link href="/auth" style={{ color: "var(--clay)" }}>Sign in</Link> to see your submission history.
       </div>
     );
   }
-
-  const { data: submissions } = await supabase
-    .from("submissions")
-    .select("id, status, score, execution_time, memory, created_at, language_id")
-    .eq("problem_id", problemId)
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(10);
 
   if (!submissions || submissions.length === 0) {
     return (
@@ -65,12 +105,14 @@ export async function DashboardSubmissions({ problemId }: { problemId: number })
           className="problem-row-hover"
         >
           <span style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--muted-2)" }}>
-            {formatDistanceToNow(new Date(sub.created_at), { addSuffix: true })}
+            <RelativeTime date={sub.created_at} />
           </span>
           <span style={{
             fontFamily: "var(--mono)", fontSize: 11.5, fontWeight: 500,
             color: statusColor[sub.status] ?? "var(--muted)",
+            display: "inline-flex", alignItems: "center", gap: 4,
           }}>
+            <VerdictIcon status={sub.status} />
             {STATUS_LABEL[sub.status] ?? sub.status}
           </span>
           <span style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 600, color: "var(--ink)", textAlign: "right" }}>

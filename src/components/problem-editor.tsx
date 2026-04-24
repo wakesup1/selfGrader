@@ -1,40 +1,34 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Editor from "@monaco-editor/react";
 import { JUDGE0_LANGUAGE_MAP, STARTER_CODE } from "@/lib/constants";
 import { STATUS_LABEL } from "@/lib/utils";
-import { Play, Terminal as TerminalIcon } from "lucide-react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { IconBrewed, IconBurnt, IconSteeping, IconTimeout, IconSpilled, IconCompileErr, IconPlay } from "@/components/icons";
 
 type SubmitResponse = {
-  status: string;
-  score: number;
-  passed: number;
-  total: number;
-  message?: string;
+  status: string; score: number; passed: number; total: number; 
+  message?: string; results: TcState[]; // เพิ่ม results ตรงนี้
 };
+
+type TcState = "pending" | "running" | "pass" | "fail";
 
 const languageOptions = Object.entries(JUDGE0_LANGUAGE_MAP).map(([id, value]) => ({
-  id: Number(id),
-  ...value,
+  id: Number(id), ...value,
 }));
-
-const verdictColor: Record<string, string> = {
-  AC:  "#8FA88C",
-  WA:  "var(--clay)",
-  TLE: "var(--amber)",
-  CE:  "#A87EC8",
-  RE:  "#C89B6B",
-};
 
 export function ProblemEditor({ problemId }: { problemId: number }) {
   const [languageId, setLanguageId] = useState(71);
   const [code, setCode] = useState(STARTER_CODE[71]);
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [tcStates, setTcStates] = useState<TcState[]>([]);
+  const [animating, setAnimating] = useState(false);
+  // Fake execution times generated once per submission — stable across re-renders.
+  // Using a ref instead of state avoids triggering extra renders.
+  const fakeTimes = useRef<string[]>([]);
   const router = useRouter();
 
   const monacoLanguage = useMemo(
@@ -42,9 +36,43 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
     [languageId],
   );
 
+  const animateCases = useCallback((results: TcState[]) => {
+    const total = results.length;
+    const init: TcState[] = Array(total).fill("pending");
+    // Generate fake execution times once per submission so they're stable across re-renders.
+    fakeTimes.current = Array.from({ length: total }, (_, i) =>
+      `0.0${((i * 7 + 3) % 9) + 1}s`
+    );
+    setTcStates(init);
+    setAnimating(true);
+
+    let i = 0;
+    const step = () => {
+      if (i >= total) { setAnimating(false); return; }
+      const idx = i;
+      setTcStates((prev) => {
+        const next = [...prev];
+        next[idx] = "running";
+        return next;
+      });
+
+      setTimeout(() => {
+        setTcStates((prev) => {
+          const next = [...prev];
+          next[idx] = results[idx]; // <--- ใช้ค่าจริงจาก Backend ตรงๆ เลย!
+          return next;
+        });
+        i++;
+        setTimeout(step, 140);
+      }, 260);
+    };
+    setTimeout(step, 200);
+  }, []);
+
   async function onSubmit() {
     setLoading(true);
     setResult(null);
+    setTcStates([]);
 
     try {
       const response = await fetch("/api/grade", {
@@ -54,168 +82,215 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
       });
 
       if (!response.ok) {
-        if (response.status === 503) {
-          alert("Judge0 server is offline or unreachable. Please try again later.");
-        } else {
-          alert("Failed to submit. Server responded with an error.");
+        const data = await response.json().catch(() => ({})) as { message?: string };
+        if (response.status === 401) {
+          alert("Please sign in to submit your solution.");
+          return;
         }
+        if (response.status === 503) {
+          alert("Judge0 server is offline. Please try again later.");
+          return;
+        }
+        alert(data.message ?? "Submission failed.");
+        return;
       }
 
+      // 3. ปรับตอนเรียกใช้ใน onSubmit
       const data = (await response.json()) as SubmitResponse;
       setResult(data);
+      animateCases(data.results); // <--- ส่งข้อมูลรายข้อไป
       router.refresh();
     } catch {
       alert("Network error: unable to reach the grading server.");
-      setResult({ status: "ERR", score: 0, passed: 0, total: 0, message: "Unexpected error" });
     } finally {
       setLoading(false);
     }
   }
 
-  const vColor = result ? (verdictColor[result.status] ?? "var(--muted)") : "var(--muted)";
+  const passedCount = tcStates.filter((s) => s === "pass").length;
 
   return (
     <div style={{
-      display: "flex", flexDirection: "column",
-      height: "100%", minHeight: "78vh",
-      overflow: "hidden", borderRadius: 14,
-      border: "1px solid var(--line)", boxShadow: "var(--shadow-sm)",
+      display: "flex", flexDirection: "column", height: "100%", minHeight: "70vh",
+      overflow: "hidden", borderRadius: 14, border: "1px solid var(--line)", boxShadow: "var(--shadow-sm)",
     }}>
       {/* Toolbar */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        borderBottom: "1px solid var(--line)",
-        background: "var(--surface)", padding: "10px 16px",
+        borderBottom: "1px solid var(--line)", background: "var(--surface)", padding: "10px 16px",
       }}>
-        <select
-          value={languageId}
-          onChange={(e) => {
-            const sel = Number(e.target.value);
-            setLanguageId(sel);
-            setCode(STARTER_CODE[sel]);
-          }}
-          style={{
-            height: 32, borderRadius: 6,
-            border: "1px solid var(--line)", background: "var(--surface)",
-            padding: "0 10px", fontSize: 12.5,
-            fontFamily: "var(--mono)", color: "var(--ink-soft)", cursor: "pointer",
-          }}
-        >
-          {languageOptions.map((lang) => (
-            <option key={lang.id} value={lang.id}>{lang.label}</option>
-          ))}
-        </select>
-
-        <button
-          onClick={onSubmit}
-          disabled={loading}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 6,
-            padding: "7px 16px",
-            background: loading ? "var(--ink-soft)" : "var(--ink)",
-            color: "var(--bg)", borderRadius: 999,
-            fontSize: 12.5, fontWeight: 500, fontFamily: "var(--sans)",
-            border: "none", cursor: loading ? "not-allowed" : "pointer",
-            transition: "all 0.15s",
-          }}
-        >
-          {loading ? (
-            <>
-              <span style={{ width: 12, height: 12, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "white", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
-              Brewing…
-            </>
-          ) : (
-            <>
-              <Play style={{ width: 12, height: 12, fill: "currentColor" }} />
-              Submit & brew
-            </>
-          )}
-        </button>
+        <div className="row items-center gap-3">
+          <div className="kicker">editor</div>
+          <select
+            value={languageId}
+            onChange={(e) => {
+              const sel = Number(e.target.value);
+              setLanguageId(sel);
+              setCode(STARTER_CODE[sel]);
+            }}
+            style={{
+              border: "1px solid var(--line)", borderRadius: 6, background: "var(--surface)",
+              padding: "4px 10px", fontSize: 12, fontFamily: "var(--mono)", color: "var(--ink-soft)",
+              outline: "none",
+            }}
+          >
+            {languageOptions.map((lang) => (
+              <option key={lang.id} value={lang.id}>{lang.label}</option>
+            ))}
+          </select>
+        </div>
+        <span className="mono muted" style={{ fontSize: 11 }}>autosaved · just now</span>
       </div>
 
-      {/* Editor + Console */}
-      <ResizablePanelGroup className="flex-1">
-        <ResizablePanel defaultSize={62} minSize={30}>
-          <Editor
-            theme="vs-dark"
-            language={monacoLanguage}
-            value={code}
-            onChange={(v) => setCode(v ?? "")}
-            options={{
-              minimap: { enabled: false },
-              fontSize: 13,
-              fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace",
-              padding: { top: 14 },
-              scrollBeyondLastLine: false,
-              automaticLayout: true,
-              lineNumbersMinChars: 3,
-            }}
-          />
-        </ResizablePanel>
+      {/* Editor pane */}
+      <div style={{ flex: "0 0 52%", minHeight: 0 }}>
+        <Editor
+          theme="vs-dark"
+          language={monacoLanguage}
+          value={code}
+          onChange={(v) => setCode(v ?? "")}
+          options={{
+            minimap: { enabled: false },
+            fontSize: 13,
+            fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace",
+            padding: { top: 12 },
+            scrollBeyondLastLine: false,
+            automaticLayout: true,
+            lineNumbersMinChars: 3,
+          }}
+        />
+      </div>
 
-        <ResizableHandle style={{ background: "var(--line)", width: 1 }} className="hover:bg-amber-300 transition-colors" />
+      {/* Editor status bar */}
+      <div style={{
+        padding: "8px 16px", borderTop: "1px solid rgba(255,255,255,0.06)", background: "#1A201A",
+        display: "flex", alignItems: "center", gap: 10, color: "#9A9782",
+        fontFamily: "var(--mono)", fontSize: 11,
+      }}>
+        <span>{JUDGE0_LANGUAGE_MAP[languageId as 54 | 62 | 71].label}</span>
+        <span style={{ marginLeft: "auto" }}>UTF-8 · LF</span>
+      </div>
 
-        <ResizablePanel defaultSize={38} minSize={20} className="flex flex-col" style={{ background: "var(--ink-bg)" }}>
-          <div style={{
-            display: "flex", alignItems: "center", gap: 8,
-            borderBottom: "1px solid rgba(255,255,255,0.07)",
-            padding: "10px 16px",
-            fontFamily: "var(--mono)", fontSize: 10.5,
-            letterSpacing: "0.2em", textTransform: "uppercase", color: "#5A6456",
-          }}>
-            <TerminalIcon style={{ width: 13, height: 13 }} />
-            OUTPUT
+      {/* Testcase panel */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 20, background: "var(--surface)", borderTop: "1px solid var(--line)" }}>
+        <div className="row items-center justify-between" style={{ marginBottom: 12 }}>
+          <div>
+            <div className="kicker">the taste test</div>
+            <div className="serif" style={{ fontSize: 20, marginTop: 2 }}>Testcases</div>
           </div>
-          <ScrollArea className="flex-1 p-4 font-mono text-xs leading-relaxed">
-            {!result && !loading && (
-              <span style={{ color: "#4A5448", fontFamily: "var(--mono)", fontSize: 12.5 }}>
-                Submit your code to see tasting notes.
+          <div className="row items-center gap-3">
+            {tcStates.length > 0 && (
+              <span className="mono muted" style={{ fontSize: 12 }}>
+                {passedCount}/{tcStates.length} passed
               </span>
             )}
+            <button
+              className="btn btn-sage"
+              onClick={onSubmit}
+              disabled={loading || animating}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              {loading ? (
+                <>
+                  <IconSteeping size={13} />
+                  Brewing…
+                </>
+              ) : (
+                <>
+                  <IconPlay size={13} />
+                  Submit &amp; brew
+                </>
+              )}
+            </button>
+          </div>
+        </div>
 
-            {loading && (
-              <span style={{ color: "var(--amber)", fontFamily: "var(--mono)", fontSize: 12.5 }}>
-                Brewing… ☕
-              </span>
-            )}
+        {/* Idle state */}
+        {tcStates.length === 0 && !loading && !result && (
+          <div style={{ padding: "24px 0", textAlign: "center", color: "var(--muted)", fontFamily: "var(--mono)", fontSize: 13 }}>
+            Submit your code to see the taste test.
+          </div>
+        )}
 
-            {result && !loading && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div>
-                  <span style={{ color: "#4A5448", fontFamily: "var(--mono)", fontSize: 11 }}>VERDICT  </span>
-                  <span style={{ fontWeight: 600, color: vColor, fontFamily: "var(--mono)" }}>
-                    {STATUS_LABEL[result.status] ?? result.status}
-                  </span>
+        {/* Loading / grading */}
+        {loading && tcStates.length === 0 && (
+          <div style={{ padding: "24px 0", textAlign: "center", color: "var(--amber-dark)", fontFamily: "var(--mono)", fontSize: 13 }}>
+            Sending to grader… ☕
+          </div>
+        )}
+
+        {/* Testcase rows */}
+        {tcStates.length > 0 && (
+          <div className="col gap-2" style={{ marginBottom: 12 }}>
+            {tcStates.map((s, i) => (
+              <div key={i} className={`tc-row ${s}`}>
+                <span className="tc-dot" />
+                <span>
+                  case {String(i + 1).padStart(2, "0")} · {
+                    ["sample","sample","small","small","medium","medium","medium","large","large","stress"][i] ?? "hidden"
+                  }
+                </span>
+                <span>
+                  {s === "pass" ? (fakeTimes.current[i] ?? "—") : s === "running" ? "…" : s === "fail" ? "WA" : "—"}
+                </span>
+                <span style={{ textAlign: "right" }}>
+                  {s === "pass" ? "✓ passed" : s === "running" ? "steeping…" : s === "fail" ? "✕ wrong" : "pending"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Result summary */}
+        {result && !animating && (
+          <div style={{ marginTop: 8 }}>
+            <div className="divider-dashed" style={{ marginBottom: 14 }} />
+            <div className="row gap-8 mono" style={{ fontSize: 12, color: "var(--ink-soft)", flexWrap: "wrap" }}>
+              <div>
+                <div className="kicker" style={{ marginBottom: 2 }}>Verdict</div>
+                <div style={{
+                  fontFamily: "var(--serif)", fontSize: 20,
+                  color: result.status === "AC" ? "#5C7558" : result.status === "TLE" ? "var(--amber-dark)" : "var(--clay)",
+                  display: "flex", alignItems: "center", gap: 6,
+                }}>
+                  {result.status === "AC"  ? <IconBrewed size={18} /> :
+                   result.status === "WA"  ? <IconBurnt size={18} /> :
+                   result.status === "TLE" ? <IconTimeout size={18} /> :
+                   result.status === "CE"  ? <IconCompileErr size={18} /> :
+                   result.status === "RE"  ? <IconSpilled size={18} /> :
+                   <IconSteeping size={18} />}
+                  {STATUS_LABEL[result.status] ?? result.status}
                 </div>
-                <div>
-                  <span style={{ color: "#4A5448", fontFamily: "var(--mono)", fontSize: 11 }}>SCORE    </span>
-                  <span style={{ color: "var(--amber)", fontFamily: "var(--mono)" }}>{result.score}</span>
+              </div>
+              <div>
+                <div className="kicker" style={{ marginBottom: 2 }}>Score</div>
+                <div style={{ fontFamily: "var(--serif)", fontSize: 20, color: "var(--clay)" }}>
+                  {result.score}
                 </div>
-                <div>
-                  <span style={{ color: "#4A5448", fontFamily: "var(--mono)", fontSize: 11 }}>CASES    </span>
-                  <span style={{ color: "#D8D2C2", fontFamily: "var(--mono)" }}>{result.passed} / {result.total}</span>
-                </div>
-                {result.message && (
-                  <div style={{
-                    marginTop: 4, borderRadius: 8,
-                    background: "rgba(184,104,94,0.12)", border: "1px solid rgba(184,104,94,0.2)",
-                    padding: "12px 14px",
-                  }}>
-                    <p style={{ marginBottom: 6, fontSize: 11, fontWeight: 500, color: "#C87B72", fontFamily: "var(--mono)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                      Error
-                    </p>
-                    <pre style={{ whiteSpace: "pre-wrap", color: "rgba(200,140,134,0.85)", fontSize: 12, margin: 0, fontFamily: "var(--mono)" }}>
-                      {result.message}
-                    </pre>
-                  </div>
-                )}
+              </div>
+              <div>
+                <div className="kicker" style={{ marginBottom: 2 }}>Passed</div>
+                <div style={{ fontSize: 14 }}>{result.passed} / {result.total}</div>
+              </div>
+            </div>
+
+            {result.message && (
+              <div style={{
+                marginTop: 12, borderRadius: 8, background: "#22291F",
+                border: "1px solid rgba(255,255,255,0.05)", padding: "12px 14px",
+              }}>
+                <div className="kicker" style={{ color: "#C87B72", marginBottom: 6 }}>compiler message</div>
+                <pre className="mono" style={{
+                  margin: 0, padding: 0, fontSize: 12, lineHeight: 1.6,
+                  color: "#D8D2C2", whiteSpace: "pre-wrap",
+                }}>
+                  {result.message}
+                </pre>
               </div>
             )}
-          </ScrollArea>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

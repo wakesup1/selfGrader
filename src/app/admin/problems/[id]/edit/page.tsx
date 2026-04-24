@@ -14,6 +14,7 @@ type Problem = {
   time_limit: number;
   memory_limit: number;
   is_published: boolean;
+  pdf_url: string | null;
 };
 
 export default async function EditProblemPage({
@@ -43,7 +44,7 @@ export default async function EditProblemPage({
   const [{ data: problem }, { data: testCases }] = await Promise.all([
     admin
       .from("problems")
-      .select("id, title, description, constraints, difficulty, points, time_limit, memory_limit, is_published")
+      .select("id, title, description, constraints, difficulty, points, time_limit, memory_limit, is_published, pdf_url")
       .eq("id", problemId)
       .single<Problem>(),
     admin
@@ -57,13 +58,11 @@ export default async function EditProblemPage({
   if (!problem) notFound();
 
   return (
-    <section className="mx-auto w-full max-w-4xl px-6 py-10">
-      <AdminProblemForm
-        initial={{
-          ...problem,
-          testCases: testCases ?? [],
-        }}
-      />
-    </section>
+    <AdminProblemForm
+      initial={{
+        ...problem,
+        testCases: testCases ?? [],
+      }}
+    />
   );
 }

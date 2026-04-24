@@ -2,10 +2,12 @@ tunnel: 5cc54978-b2cc-4aa5-9bbf-e518fe7219c2
 credentials-file: /Users/1st/.cloudflared/5cc54978-b2cc-4aa5-9bbf-e518fe7219c2.json
 
 ingress:
-  - hostname: web.nograder.dev  # เลเวล 1: ขยับเข้า 2 Space
+  - hostname: web.nograder.dev
     service: http://localhost:3000
-    
-  - hostname: nograder.dev      # เลเวล 1
+    originRequest:
+      noChunkedEncoding: true
+      
+  - hostname: api.nograder.dev      # เลเวล 1
     service: http://localhost:2358
     
   - service: http_status:404    # เลเวล 1 (ต้องมีปิดท้ายเสมอ)

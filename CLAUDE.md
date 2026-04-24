@@ -2,7 +2,7 @@
 
 # NoGrader — Project Blueprint
 
-> **Purpose:** This file is the single source of truth for building NoGrader, a full-stack online code execution and grading platform. It is written for an AI coding agent (Sonnet) to follow step-by-step. Read this entire document before writing any code.
+> **Purpose:** This file is the single source of truth for building NoGrader, a full-stack online code execution and grading platform. It is written for an AI coding agent (Sonnet 4.6) to follow step-by-step. Read this entire document before writing any code.
 
 ---
 
@@ -18,11 +18,13 @@
 
 ### Live Infrastructure
 
-| Service | URL | Notes |
-|---------|-----|-------|
-| Judge0 API | `https://nograder.dev` | Self-hosted via Cloudflare Tunnel, port 2358 locally |
-| Web App | `https://web.nograder.dev` | Next.js on port 3000, tunneled via Cloudflare |
-| Supabase | Cloud-hosted | Auth + PostgreSQL + RLS |
+| Service | URL | Internal (server-to-server) | Notes |
+|---------|-----|----------------------------|-------|
+| Judge0 API | `https://api.nograder.dev` | `http://localhost:2358` | Self-hosted via Cloudflare Tunnel |
+| Web App | `https://web.nograder.dev` | `http://localhost:3000` | Next.js via Cloudflare Tunnel |
+| Supabase | Cloud-hosted | — | Auth + PostgreSQL + RLS |
+
+**CRITICAL:** Server-side code (API routes, services) MUST call Judge0 at `http://localhost:2358` — never through the public tunnel. The public URL exists only for browser-facing links and Cloudflare routing.
 
 ---
 
@@ -30,17 +32,18 @@
 
 | Layer | Technology | Version |
 |-------|-----------|---------|
-| Framework | Next.js (App Router) | 16.x (see `AGENTS.md` — read Next.js docs in `node_modules/next/dist/docs/` before writing any code) |
+| Framework | Next.js (App Router) | 16.x (see `AGENTS.md`) |
 | Language | TypeScript | 5.x |
-| Styling | Tailwind CSS | 4.x (uses `@theme inline` blocks in CSS, NOT `tailwind.config.js`) |
-| UI Components | Custom (shadcn-style) | Located in `src/components/ui/` |
+| Styling | Custom CSS variables + Tailwind CSS | 4.x (`@theme inline` blocks, NOT `tailwind.config.js`) |
+| UI Components | Custom cafe-themed components | `src/components/` |
 | Code Editor | Monaco Editor | `@monaco-editor/react` |
-| Resizable Panels | `react-resizable-panels` | For split-screen editor layout |
 | Auth & Database | Supabase (Auth + PostgreSQL + RLS) | `@supabase/ssr` + `@supabase/supabase-js` |
 | Code Execution | Judge0 CE | v1.13.1, self-hosted |
 | Validation | Zod | 4.x |
 | Icons | Lucide React | `lucide-react` |
-| Fonts | Space Grotesk (sans) + JetBrains Mono (mono) | Google Fonts via CSS import |
+| Fonts | Fraunces (serif) + DM Sans (body) + JetBrains Mono (code) | Via CSS `@import` |
+
+**No Prisma.** The project uses the Supabase SDK directly. Do not add Prisma.
 
 ---
 
@@ -53,14 +56,18 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=      # Supabase anon/public key
 SUPABASE_SERVICE_ROLE_KEY=          # Server-only, for admin operations
 
 # Judge0
-JUDGE0_URL=https://nograder.dev     # Base URL, NO trailing slash
-JUDGE0_API_KEY=                     # Optional: RapidAPI key (for hosted Judge0)
+JUDGE0_URL=http://localhost:2358    # Server-only internal URL (NEVER the public tunnel)
+JUDGE0_API_KEY=                     # Optional: RapidAPI key (leave blank for self-hosted)
 JUDGE0_API_HOST=                    # Optional: RapidAPI host header
+NEXT_PUBLIC_JUDGE0_URL=https://api.nograder.dev  # Public URL (for display/links only)
+
+# Site
+NEXT_PUBLIC_SITE_URL=https://web.nograder.dev    # Used for Supabase auth email redirects
 ```
 
 **Rules:**
-- `JUDGE0_URL` is server-only (no `NEXT_PUBLIC_` prefix) — never expose it to the client
-- All Judge0 calls happen server-side in API routes
+- `JUDGE0_URL` is `http://localhost:2358` — server-side only, never exposed to client
+- `NEXT_PUBLIC_SITE_URL` must match the production domain for auth email redirects to work
 - Supabase URL and anon key are public; service role key is server-only
 
 ---
@@ -69,79 +76,86 @@ JUDGE0_API_HOST=                    # Optional: RapidAPI host header
 
 ```
 grader/
-├── CLAUDE.md                          # This file
+├── CLAUDE.md                          # This file — the canonical project blueprint
 ├── AGENTS.md                          # Next.js version warning
-├── middleware.ts                       # Supabase session refresh
+├── middleware.ts                       # Supabase session refresh (delegates to lib/supabase/middleware.ts)
 ├── config.yml                         # Cloudflare Tunnel config
+├── .env                               # Environment variables
 ├── judge0-v1.13.1/                    # Self-hosted Judge0 Docker config
 │   └── judge0.conf
 ├── supabase/
 │   └── grader_schema.sql              # Complete DB schema + RLS + triggers
+│
 ├── src/
+│   ├── services/                      # ★ Business logic layer (server-only)
+│   │   ├── judge0.ts                  # Judge0 HTTP client: submitCode, pollResult, mapVerdict
+│   │   ├── grading.ts                 # Orchestration: run all test cases → persist submission
+│   │   └── problems.ts               # Admin CRUD: createProblem, updateProblem, isAdmin
+│   │
+│   ├── actions/                       # ★ Next.js Server Actions
+│   │   ├── auth.ts                    # signIn, signUp, signOut (form actions)
+│   │   └── submissions.ts            # gradeCode (alternative to API route)
+│   │
+│   ├── lib/
+│   │   ├── supabase/                  # Supabase client factory
+│   │   │   ├── client.ts             # Browser client (createBrowserClient)
+│   │   │   ├── server.ts             # Server client (cookies, empty-catch setAll)
+│   │   │   ├── admin.ts              # Admin client (service role, bypasses RLS)
+│   │   │   └── middleware.ts          # Session refresh (re-creates response in setAll)
+│   │   ├── constants.ts               # Language map, starter code, SUBMISSION_STATUS
+│   │   ├── types.ts                   # Problem, TestCase, Profile, Submission
+│   │   └── utils.ts                   # normalizeOutput, cn, createSlug, STATUS_LABEL
+│   │
 │   ├── app/
-│   │   ├── layout.tsx                 # Root layout: fonts, SiteHeader, dark bg
-│   │   ├── page.tsx                   # Landing page (hero + feature cards)
-│   │   ├── globals.css                # Tailwind + CSS variables + custom theme
-│   │   ├── auth/
-│   │   │   └── page.tsx               # Login / Signup toggle form
+│   │   ├── layout.tsx                 # Root layout: fonts, SiteHeader
+│   │   ├── page.tsx                   # Dashboard: hero + submit box + problems table
+│   │   ├── globals.css                # Full cafe design system (CSS variables + utility classes)
+│   │   ├── auth/page.tsx              # Login/signup form
 │   │   ├── problems/
-│   │   │   ├── page.tsx               # Problem list (table with difficulty badges)
-│   │   │   └── [id]/
-│   │   │       └── page.tsx           # Problem detail: description + editor + console
+│   │   │   ├── page.tsx               # Problem list with ProblemsTableFull + user stats
+│   │   │   └── [id]/page.tsx          # Problem detail: description tabs + editor + testcases
 │   │   ├── submissions/
-│   │   │   ├── page.tsx               # All submissions list (filterable)
-│   │   │   └── [id]/
-│   │   │       └── page.tsx           # Single submission detail (code + verdict)
-│   │   ├── leaderboard/
-│   │   │   └── page.tsx               # Ranked user table
-│   │   ├── admin/
-│   │   │   └── problems/
-│   │   │       └── new/
-│   │   │           └── page.tsx       # Create problem form
-│   │   └── api/
-│   │       ├── grade/
-│   │       │   └── route.ts           # POST: grade submission against all test cases
-│   │       ├── submissions/
-│   │       │   └── grade/
-│   │       │       └── route.ts       # Legacy/alternate grade endpoint
-│   │       └── admin/
-│   │           └── problems/
-│   │               └── route.ts       # POST: create problem + test cases (admin only)
-│   ├── components/
-│   │   ├── site-header.tsx            # Sticky nav with auth state
-│   │   ├── auth-form.tsx              # Email/password form (login + signup modes)
-│   │   ├── problem-list.tsx           # Problem table component
-│   │   ├── problem-editor.tsx         # Monaco + console split-screen
-│   │   ├── dashboard-submissions.tsx  # Recent submissions table on problem page
-│   │   ├── leaderboard-table.tsx      # Leaderboard rankings
-│   │   ├── admin-problem-form.tsx     # Problem creation form
-│   │   └── ui/                        # Base UI primitives (shadcn-style)
-│   │       ├── badge.tsx
-│   │       ├── button.tsx
-│   │       ├── card.tsx
-│   │       ├── input.tsx
-│   │       ├── resizable.tsx
-│   │       ├── scroll-area.tsx
-│   │       ├── table.tsx
-│   │       ├── tabs.tsx
-│   │       └── textarea.tsx
-│   └── lib/
-│       ├── constants.ts               # Language map, starter code, status codes
-│       ├── types.ts                   # TypeScript types (Problem, TestCase, etc.)
-│       ├── judge0.ts                  # Judge0 HTTP helper (runJudge0, mapStatus)
-│       ├── utils.ts                   # normalizeOutput, cn, etc.
-│       └── supabase/
-│           ├── client.ts              # Browser client (createBrowserClient)
-│           ├── server.ts              # Server client (createServerClient + cookies)
-│           ├── admin.ts               # Admin client (service role key, no RLS)
-│           └── middleware.ts          # Session refresh middleware helper
+│   │   │   ├── page.tsx               # All submissions with filter tabs
+│   │   │   └── [id]/page.tsx          # Receipt-style submission detail + tc rows + code pane
+│   │   ├── leaderboard/page.tsx       # Hall of Fame: coffee cards / podium / ledger layouts
+│   │   ├── admin/problems/
+│   │   │   ├── page.tsx               # Admin problem list
+│   │   │   ├── new/page.tsx           # Create problem form
+│   │   │   └── [id]/edit/page.tsx     # Edit problem form
+│   │   └── api/                       # ★ Thin route handlers (parse → delegate to services)
+│   │       ├── grade/route.ts         # POST: parse → gradeSubmission() → respond
+│   │       ├── my-submissions/route.ts # GET: user's submissions for a problem
+│   │       └── admin/problems/
+│   │           ├── route.ts           # POST: createProblem()
+│   │           └── [id]/route.ts      # PATCH: updateProblem()
+│   │
+│   └── components/
+│       ├── site-header.tsx            # Sticky nav with auth state + signOut action
+│       ├── auth-form.tsx              # Email/password form (uses window.location.href for redirect)
+│       ├── problem-editor.tsx         # Monaco + testcase animation panel
+│       ├── problem-desc-tabs.tsx      # Problem/examples/submissions tabs
+│       ├── problems-table-full.tsx    # Problem table with filters + search + progress bars
+│       ├── dashboard-hero.tsx         # Cup illustration + stats
+│       ├── dashboard-submit-box.tsx   # File upload + problem selector
+│       ├── dashboard-submissions.tsx  # User's recent submissions (client, fetches via API)
+│       ├── submissions-list.tsx       # All submissions with filter tabs
+│       ├── leaderboard-table.tsx      # Coffee cards / podium / ledger switcher
+│       ├── admin-problem-form.tsx     # Create/edit problem form
+│       └── ui/                        # Base UI primitives
 ```
+
+### Architecture Principles
+
+1. **Services** (`src/services/`) contain all business logic. They are server-only, have no HTTP/Next.js dependencies, and return plain objects.
+2. **API Routes** (`src/app/api/`) are thin handlers: validate input → check auth → call a service → return JSON.
+3. **Server Actions** (`src/actions/`) are the same pattern but callable from client components via `useFormState` or `useTransition`.
+4. **Client Components** never import from `src/services/` or `src/lib/supabase/server.ts`. They communicate via API routes or Server Actions.
 
 ---
 
 ## 5. Database Schema
 
-The database uses **Supabase PostgreSQL** with Row Level Security (RLS). The complete schema is in `supabase/grader_schema.sql`. Here is the logical model:
+The database uses **Supabase PostgreSQL** with Row Level Security (RLS). The complete schema is in `supabase/grader_schema.sql`.
 
 ### Tables
 
@@ -178,7 +192,7 @@ The database uses **Supabase PostgreSQL** with Row Level Security (RLS). The com
 | `problem_id` | bigint | FK → `problems(id)` ON DELETE CASCADE |
 | `input` | text | Default '' |
 | `expected_output` | text | NOT NULL |
-| `is_sample` | boolean | Default false (sample cases are shown to users) |
+| `is_sample` | boolean | Default false |
 | `created_at` | timestamptz | Default `now()` |
 
 #### `submissions`
@@ -224,368 +238,207 @@ The database uses **Supabase PostgreSQL** with Row Level Security (RLS). The com
 
 ---
 
-## 6. API Contracts
+## 6. Services Layer
 
-### 6.1 `POST /api/grade` — Grade a Submission
+### 6.1 `src/services/judge0.ts` — Judge0 HTTP Client
 
-**Purpose:** Receives user code, runs it against all test cases via Judge0, records the submission, returns the verdict.
+All Judge0 communication goes through this module. No other file should call Judge0 directly.
 
-**Auth:** Requires authenticated Supabase session (checked via `supabase.auth.getUser()`).
-
-**Request Body:**
-```json
-{
-  "problemId": 1,
-  "code": "print(int(input()) + int(input()))",
-  "languageId": 71
-}
+```
+submitCode(payload) → string (token)
+pollResult(token)   → Judge0Result
+mapVerdict(result)  → "AC" | "WA" | "TLE" | "CE" | "RE" | "ERR"
 ```
 
-**Validation:** Zod schema — `problemId` (positive int), `code` (non-empty string), `languageId` (int).
+- Uses **async submit + poll** (NOT `?wait=true`) for reliability
+- `AbortSignal.timeout(8000)` on every HTTP call
+- Maps status by **numeric ID first** (3=AC, 4=WA, 5=TLE, 6=CE, 7-12=RE), string fallback second
+- Judge0 status IDs 1 and 2 = "In Queue"/"Processing" — keep polling (max 25 × 1s)
 
-**Server Logic:**
-1. Verify user is authenticated
-2. Fetch problem (points, time_limit, memory_limit) using admin client
-3. Fetch all test cases for the problem using admin client (test cases are hidden from RLS)
-4. For each test case, sequentially:
-   a. POST to Judge0: `${JUDGE0_URL}/submissions?base64_encoded=false` (async, returns token)
-   b. Poll `${JUDGE0_URL}/submissions/${token}?base64_encoded=false` until status is not processing (max 25 polls, 1s interval)
-   c. Compare normalized stdout to expected output
-   d. On first failure (WA/TLE/RE/CE), stop and record the failure status
-5. Calculate score: `Math.round((problem.points * passed) / total)`
-6. Insert submission into DB via admin client (triggers auto-update `user_problem_stats` and `profiles`)
-7. Return verdict
+### 6.2 `src/services/grading.ts` — Submission Orchestrator
 
-**Success Response (200):**
-```json
-{
-  "status": "AC",
-  "score": 100,
-  "passed": 5,
-  "total": 5
-}
+```
+gradeSubmission(req) → { status, score, passed, total, message? }
+recordOfflineSubmission(req, totalCount) → void
 ```
 
-**Failure Response (200 with non-AC status):**
-```json
-{
-  "status": "WA",
-  "score": 60,
-  "passed": 3,
-  "total": 5,
-  "message": "Wrong Answer on test case 4"
-}
+- Fetches problem + test cases via admin client (bypasses RLS)
+- Runs test cases sequentially; stops on first failure
+- Score = `Math.round((problem.points * passed) / total)`
+- Persists submission to DB (triggers update `user_problem_stats` and `profiles`)
+
+### 6.3 `src/services/problems.ts` — Problem CRUD
+
+```
+createProblem(input) → number (id)
+updateProblem(id, input) → void
+isAdmin(userId) → boolean
 ```
 
-**Error Responses:**
-- `401` — Not authenticated
-- `404` — Problem not found
-- `400` — No test cases / invalid request
-- `503` — Judge0 offline (submission still recorded with status `JUDGE0_OFFLINE`)
-- `500` — Internal error
-
-### 6.2 `POST /api/admin/problems` — Create a Problem (Admin)
-
-**Auth:** Requires authenticated user with `is_admin = true`.
-
-**Request Body:**
-```json
-{
-  "title": "A+B Problem",
-  "slug": "a-plus-b",
-  "description": "Given two integers, output their sum.",
-  "constraints": "1 <= A, B <= 10^9",
-  "difficulty": "Easy",
-  "points": 100,
-  "time_limit": 2,
-  "memory_limit": 256,
-  "testCases": [
-    { "input": "1 2", "expected_output": "3", "is_sample": true },
-    { "input": "100 200", "expected_output": "300", "is_sample": false }
-  ]
-}
-```
-
-### 6.3 Judge0 Integration Details
-
-**Submission payload sent to Judge0:**
-```json
-{
-  "source_code": "<user code>",
-  "language_id": 71,
-  "stdin": "<test case input>",
-  "cpu_time_limit": 2,
-  "memory_limit": 262144
-}
-```
-
-**Notes:**
-- `memory_limit` is sent in **KB** to Judge0 (DB stores MB, multiply by 1024)
-- `base64_encoded=false` — we send plain text, not base64
-- The grading flow uses **async submit + poll** (not `?wait=true`) for reliability
-- Judge0 status IDs 1 and 2 mean "In Queue" and "Processing" — keep polling
-- Status mapping: `Accepted` → AC, `Wrong Answer` → WA, `Time Limit Exceeded` → TLE, `Compilation Error` → CE, `Runtime Error` / `SIGSEGV` → RE
-
-**Supported Languages:**
-| Judge0 ID | Language | Monaco Mode |
-|-----------|----------|-------------|
-| 71 | Python 3 | `python` |
-| 54 | C++17 | `cpp` |
-| 62 | Java 17 | `java` |
+- Admin client for all writes
+- Callers MUST verify `isAdmin()` before mutating
 
 ---
 
-## 7. UI/UX Design System
+## 7. API Contracts
 
-### 7.1 Color Palette (Dark Mode Only)
+### 7.1 `POST /api/grade` — Grade a Submission
 
-The app is **dark-mode only**. Colors are defined as CSS variables in `globals.css`:
+Thin handler: parse → auth → `gradeSubmission()` → respond.
 
-```
-Background:      #090b10  (--background)       — Deep navy-black
-Background Soft: #0f131b  (--background-soft)  — Slightly lighter for cards
-Foreground:      #eef3ff  (--foreground)        — Near-white text
-Muted:           #93a0ba  (--muted)             — Secondary text
-Accent:          #22d3ee  (--accent)            — Cyan-400 for highlights, brand
-```
+**Request:** `{ problemId: number, code: string, languageId: number }`
 
-**Extended Palette (use Tailwind classes):**
-| Purpose | Tailwind Class | Hex |
-|---------|---------------|-----|
-| Card borders | `border-zinc-800` | ~#27272a |
-| Card backgrounds | `bg-zinc-950` or `bg-slate-950` | ~#09090b |
-| Hover states | `hover:bg-zinc-800` | ~#27272a |
-| Input borders | `border-slate-700` | ~#334155 |
-| Input bg | `bg-slate-900` | ~#0f172a |
-| Primary button | `bg-blue-600 hover:bg-blue-700` | #2563eb |
-| Success (AC) | `text-green-500` | #22c55e |
-| Error (RE/CE) | `text-red-500` | #ef4444 |
-| Warning (WA/TLE) | `text-amber-500` | #f59e0b |
-| Info (score) | `text-blue-400` | #60a5fa |
-| Brand accent | `text-cyan-300` | #67e8f9 |
+**Responses:**
+- `200` — `{ status, score, passed, total, message? }`
+- `401` — Not authenticated
+- `404` — Problem not found
+- `400` — No test cases / invalid request
+- `503` — Judge0 offline (submission recorded with `JUDGE0_OFFLINE`)
 
-**Background Effects:**
-The body has layered radial gradients for a subtle glow effect:
-- Cyan glow at top-left (15%, -20%)
-- Emerald glow at bottom-right (85%, 120%)
+### 7.2 `POST /api/admin/problems` — Create Problem
 
-### 7.2 Typography
+**Auth:** `is_admin = true`
 
-| Element | Font | Tailwind Class |
-|---------|------|---------------|
-| Body / UI text | Space Grotesk | `font-sans` (set in `@theme inline`) |
-| Code / terminal | JetBrains Mono | `font-mono` (set in `@theme inline`) |
-| Hero heading | Space Grotesk | `text-4xl md:text-5xl font-black tracking-tight` |
-| Section labels | Space Grotesk | `text-sm uppercase tracking-[0.2em] text-cyan-300` |
-| Nav links | Space Grotesk | `text-sm text-zinc-300` |
-| Code editor | JetBrains Mono 14px | Monaco `fontSize: 14` option |
+**Request:** `{ title, description, constraints, difficulty, points, time_limit, memory_limit, testCases[] }`
 
-### 7.3 Layout Rules
+### 7.3 `PATCH /api/admin/problems/[id]` — Update Problem
 
-#### Global Layout
-- **Max width:** `max-w-6xl` centered with `mx-auto px-6`
-- **Header:** Sticky top, `bg-zinc-950/80 backdrop-blur`, border-bottom `border-zinc-800/70`
-- **Main content:** `flex flex-1 flex-col` to fill viewport height
-- **No footer** — minimal design
+Same schema as create, plus `is_published: boolean`.
 
-#### Problem Page Layout (Split-Screen)
-The problem page (`/problems/[id]`) uses a **horizontal split-screen**:
-- **Left panel (60%):** Monaco code editor with dark theme
-- **Right panel (40%):** Console/terminal output area
-- **Resize handle:** Draggable via `react-resizable-panels`, styled `bg-slate-800`
-- **Toolbar above editor:** Language selector dropdown + "Run Code" button
-- **Total height:** `h-[80vh]` with `overflow-hidden`
+### 7.4 `GET /api/my-submissions?problemId=N` — User's Submissions
 
-#### Problem Detail Page Structure
-The problem detail page should display:
-1. **Problem description section** — Title, difficulty badge, points, time/memory limits, description (Markdown), constraints, sample test cases
-2. **Editor section** — The split-screen `ProblemEditor` component
-3. **Submissions section** — Recent submissions for this problem by the current user (via `DashboardSubmissions`)
-
-#### Card Design
-- Border: `border-zinc-800`
-- Background: `bg-gradient-to-br from-zinc-950 via-zinc-900` (hero) or flat `bg-zinc-950`
-- Shadow: `shadow-[0_0_40px_rgba(34,211,238,0.12)]` for hero card
-- Rounded: `rounded-2xl` (hero) or `rounded-xl` (standard)
-
-#### Difficulty Badges
-| Difficulty | Colors |
-|-----------|--------|
-| Easy | `bg-green-500/10 text-green-400 border-green-500/20` |
-| Medium | `bg-amber-500/10 text-amber-400 border-amber-500/20` |
-| Hard | `bg-red-500/10 text-red-400 border-red-500/20` |
-
-### 7.4 Component Patterns
-
-#### Buttons
-- **Primary:** `bg-blue-600 text-white hover:bg-blue-700 font-semibold`
-- **Outline:** `border border-zinc-700 text-zinc-300 hover:bg-zinc-800`
-- **Loading state:** Spinner (animated border) + "Running..." text
-
-#### Tables
-- Use `<Table>` component from `src/components/ui/table.tsx`
-- Header: `bg-zinc-900/50 text-zinc-400 text-xs uppercase tracking-wider`
-- Rows: `border-b border-zinc-800/50 hover:bg-zinc-900/30`
-
-#### Forms / Inputs
-- Background: `bg-slate-900`
-- Border: `border-slate-700 focus:border-blue-600 focus:ring-1 focus:ring-blue-600`
-- Text: `text-slate-200`
-- Label: `text-sm font-medium text-zinc-300`
-
-#### Console/Terminal Panel
-- Background: `bg-black`
-- Header bar: `bg-slate-900/50` with terminal icon + "CONSOLE" label
-- Text: `font-mono text-sm leading-relaxed`
-- Idle state: `text-slate-500` "Ready to run. Output will appear here..."
-- Loading state: `animate-pulse text-blue-400` "Executing..."
+Returns `{ submissions: SubmissionRow[] | null }` (null = not authenticated).
 
 ---
 
 ## 8. Supabase Client Patterns
 
-### Three client types (already implemented in `src/lib/supabase/`):
+### Four client types in `src/lib/supabase/`:
 
-1. **Browser Client** (`client.ts`) — `createBrowserClient()` for client components
-   - Uses `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - Subject to RLS policies
+| File | Used In | RLS | Cookie Handling |
+|------|---------|-----|-----------------|
+| `client.ts` | Client components (`"use client"`) | Yes | Browser-managed |
+| `server.ts` | Server components, server actions | Yes | Empty try-catch in `setAll` |
+| `admin.ts` | Services (grading, problems) | **Bypassed** | None (service role) |
+| `middleware.ts` | `middleware.ts` root | Yes | Re-creates `NextResponse` in `setAll` |
 
-2. **Server Client** (`server.ts`) — `createServerClient()` for server components and server actions
-   - Reads/writes cookies for session management
-   - Subject to RLS policies
-   - Must `await cookies()` first
+### Middleware Cookie Pattern (CRITICAL)
 
-3. **Admin Client** (`admin.ts`) — `createClient()` with service role key
-   - Bypasses RLS — use for grading (reading test cases) and recording submissions
-   - **Never expose to client code**
+The middleware `setAll` must re-assign `supabaseResponse` inside the callback:
 
-### Middleware (`middleware.ts`)
-- Refreshes Supabase auth session on every request
-- Matcher excludes static files and images
+```ts
+setAll(cookiesToSet) {
+  cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+  supabaseResponse = NextResponse.next({ request }); // ← re-create from mutated request
+  cookiesToSet.forEach(({ name, value, options }) =>
+    supabaseResponse.cookies.set(name, value, options)
+  );
+}
+```
+
+Without the re-assignment, refreshed session cookies are lost and users get randomly logged out.
 
 ---
 
 ## 9. Auth Flow
 
-**Provider:** Supabase Auth with email/password (no OAuth for now).
+**Provider:** Supabase Auth with email/password.
 
-### Signup Flow
+### Signup
 1. User fills email + password + username on `/auth?mode=signup`
-2. Call `supabase.auth.signUp({ email, password, options: { data: { username } } })`
-3. Supabase creates `auth.users` row → trigger auto-creates `profiles` row
-4. Redirect to `/problems`
+2. `supabase.auth.signUp({ email, password, options: { data: { username }, emailRedirectTo: SITE_URL } })`
+3. Trigger creates `profiles` row
+4. **Hard redirect** via `window.location.href = "/problems"` (NOT `router.push`)
 
-### Login Flow
-1. User fills email + password on `/auth?mode=login`
-2. Call `supabase.auth.signInWithPassword({ email, password })`
-3. Redirect to `/problems`
+### Login
+1. `supabase.auth.signInWithPassword({ email, password })`
+2. **Hard redirect** via `window.location.href = "/problems"`
+
+### Why `window.location.href` instead of `router.push`
+Next.js App Router soft navigation does not re-run middleware. After setting auth cookies, a hard navigation is required so middleware processes the new session. Without this, users appear logged out after login on production (Cloudflare Tunnel).
 
 ### Sign Out
-- Server Action in `SiteHeader` calls `supabase.auth.signOut()`
-- Header conditionally renders Sign Out button or Login/Signup buttons based on `getUser()`
+- Server Action: `supabase.auth.signOut()` + `redirect("/")`
+- In `site-header.tsx`, used as a form action
 
-### Protected Routes
-- The editor's submit button calls `/api/grade` which checks auth server-side
-- No client-side route guards needed — unauthenticated users see the UI but get 401 on submit
-- Admin routes check `profiles.is_admin` server-side
+### Supabase Dashboard Configuration
+The following redirect URLs must be whitelisted in the Supabase Dashboard under Authentication → URL Configuration:
+- `https://web.nograder.dev/**`
+- `http://localhost:3000/**`
 
 ---
 
 ## 10. Key Implementation Constraints
 
-1. **Next.js version:** This project uses Next.js 16. Always read `node_modules/next/dist/docs/` for current API. Do NOT assume Next.js 14/15 patterns work.
-
-2. **Tailwind v4:** Uses `@theme inline` blocks in CSS, not `tailwind.config.js`. Use `@import "tailwindcss"` instead of `@tailwind` directives.
-
-3. **No Prisma:** Despite being in the original spec, this project uses **Supabase client SDK** directly (not Prisma). Do not add Prisma.
-
-4. **No NextAuth.js:** Auth is handled by **Supabase Auth**, not NextAuth. Do not add NextAuth.
-
-5. **Zod v4:** Import from `zod` (v4 API). Check for breaking changes vs v3.
-
-6. **Judge0 calls are server-only:** All Judge0 API calls go through `/api/grade` route. The client never calls Judge0 directly.
-
-7. **Output normalization:** When comparing Judge0 stdout to expected output, trim trailing whitespace/newlines from both sides before comparing. Use `normalizeOutput()` from `utils.ts`.
-
-8. **Sequential test case execution:** Test cases are run one at a time (not batched). On first failure, stop and return the failure status. Score is proportional to passed count.
-
-9. **Admin operations use service role key:** Admin client bypasses RLS. Always verify `is_admin` before using admin client in API routes.
-
-10. **`"use client"` directive:** Only add to components that use React hooks, browser APIs, or event handlers. Server Components are the default.
+1. **Next.js 16:** Read `node_modules/next/dist/docs/` before assuming any API pattern.
+2. **Tailwind v4:** `@theme inline` blocks in CSS, not `tailwind.config.js`.
+3. **No Prisma:** Supabase SDK only. Do not add Prisma.
+4. **No NextAuth:** Supabase Auth only.
+5. **Judge0 is localhost:** `JUDGE0_URL=http://localhost:2358`. Never use the public tunnel URL in server code.
+6. **Services are the single source of business logic.** API routes and Server Actions are thin wrappers.
+7. **Client components never import server-only modules.** If a client component needs data, it fetches from an API route or receives it as props from a server component.
+8. **`dashboard-submissions.tsx` is a client component** that fetches via `/api/my-submissions`. It was originally a server component but that caused a build error (imported `server.ts` inside a `"use client"` boundary).
+9. **Sequential test case execution.** On first failure, stop. Score is proportional to passed count.
+10. **Admin operations use service role key.** Always verify `isAdmin()` from `src/services/problems.ts` before calling any admin service function.
 
 ---
 
-## 11. Implementation Phases
+## 11. Design System
 
-### Phase 1: Foundation & Auth ✅ (Already Done)
-- [x] Next.js project scaffolding with App Router
-- [x] Tailwind CSS v4 with custom dark theme
-- [x] Supabase client setup (browser, server, admin, middleware)
-- [x] Database schema with RLS and triggers
-- [x] Auth form (login/signup with email/password)
-- [x] Site header with auth-aware navigation
-- [x] Landing page with hero + feature cards
+# nograder — design reference
 
-### Phase 2: Core Problem Infrastructure ✅ (Already Done)
-- [x] Problem list page (`/problems`)
-- [x] Problem detail page with Monaco editor (`/problems/[id]`)
-- [x] Split-screen editor with resizable panels
-- [x] Language selector (Python, C++, Java)
-- [x] Judge0 integration with async submit + poll
-- [x] Grading API route (`/api/grade`)
-- [x] Admin problem creation page + API
+This is the **finalized design** for the cafe-chill style grading platform.
+Before implementing anything, **read these files as the Source of Truth**:
 
-### Phase 3: Submissions & Leaderboard ✅ (Already Done)
-- [x] Submissions list page (`/submissions`)
-- [x] Single submission detail page (`/submissions/[id]`)
-- [x] Dashboard submissions on problem page
-- [x] Leaderboard page with ranked users
+- `nograder.html` — entry point, app shell, routing, tweaks protocol
+- `styles.css` — all design tokens (CSS variables), component classes
+- `data.js` — data schemas (problems, submissions, hall of fame, announcements, user)
+- `components/Shell.jsx` — Topbar, BrandMark, Chip, Progress, Toast, CodePane, CupIllustration
+- `components/Dashboard.jsx` — hero + submit box + problems table + announcements
+- `components/ProblemPage.jsx` — PDF viewer / tabs / editor / live testcase progress
+- `components/Submissions.jsx` — list + receipt-style detail
+- `components/HallOfFame.jsx` — 3 layouts (grid / podium / list)
+- `components/PostProblem.jsx` — admin form (PDF upload or inline markdown)
 
-### Phase 4: Polish & Enhancements (Next)
-- [ ] **Problem description Markdown rendering** — Render problem descriptions with proper Markdown (code blocks, math, tables). Use a lightweight Markdown library.
-- [ ] **Sample test cases display** — Show `is_sample = true` test cases on the problem page so users can see example inputs/outputs before coding
-- [ ] **Submission detail improvements** — Show code with syntax highlighting, execution time, memory usage, per-test-case results
-- [ ] **Admin problem editing** — Edit existing problems and test cases (currently only creation exists)
-- [ ] **Admin problem list** — View/manage all problems with publish/unpublish toggle
-- [ ] **User profile page** — Show user's solved problems, submission history, score breakdown
-- [ ] **Better error messages in console** — Show compilation errors, runtime errors with line numbers when possible
-- [ ] **Mobile responsiveness** — The editor is desktop-focused; add responsive breakpoints for problem description (stack vertically on mobile)
+## Strict Rules — Do Not Change
+- **Palette:** Use CSS variables in `styles.css` (`--bg`, `--ink`, `--sage-dark`, `--amber`, `--clay`, `--kraft`) — default accent = **clay**.
+- **Fonts:** Fraunces (display/serif), DM Sans (body 450), JetBrains Mono (code/stats), IBM Plex Sans Thai Looped (Thai language support).
+- **Metaphor:** menu / receipt / roast / brewing — consistent tone across all pages.
+- **Density:** spacious, 1px lines color `--line`, subtle shadows.
+- **Typography Hierarchy:** page-title = Fraunces 56px, card headings = Fraunces 20–26px, kicker = mono 10.5px uppercase tracked.
 
-### Phase 5: Advanced Features (Future)
-- [ ] **Custom test case runner** — Let users test against their own input before submitting
-- [ ] **Submission history per problem** — Show all attempts for a specific problem
-- [ ] **Problem tags/categories** — Filter problems by topic (DP, graphs, sorting, etc.)
-- [ ] **Contest mode** — Time-limited problem sets with separate leaderboard
-- [ ] **Code templates per language** — Better starter code with input parsing boilerplate
-- [ ] **Rate limiting** — Prevent submission spam (e.g., max 1 submission per 5 seconds)
-- [ ] **WebSocket for Judge0** — Replace polling with real-time status updates
+## Hall of Fame: Default = List, Accent = Clay
 
+## Feature Scope (6 Pages)
+1. **Dashboard** — greeting hero, submit box, problem menu (filter by topic/difficulty/search), announcements panel.
+2. **Problems** — full menu (reuse `ProblemsTable` from Dashboard).
+3. **Problem Detail** — header + your-tab card + PDF viewer (default) or inline statement + editor + 10 testcases with live progress animation.
+4. **Submissions** — filters (Brewed/Steeping/Burnt), table, click-through to detail page.
+5. **Submission Detail** — receipt header + verdict hero + testcases + code + compiler message.
+6. **Hall of Fame** — tweakable via 3 layouts: list (default), podium, and coffee-card grid.
+7. **Post Problem** — PDF upload mode (default) or write inline, testcase editor, judging settings, and checklist.
+
+## Required Interactions (Do Not Remove)
+- **Submit:** Animate 10 testcases sequentially → display toast verdict.
+- **Toast Stack:** Top-right placement, 3 types: ok (sage), wrong (clay), info (amber).
+- **Tweaks Panel:** Bottom-right corner. Toggle HoF layout + accent color; must persist via `localStorage`.
+- **Navigation:** Nav + view + problem/submission selection must persist via `localStorage`.
+
+## Deployment Guidelines (Porting to Production)
+- Replace mock data in `data.js` with actual API calls.
+- **Submit Box:** Use real `POST` requests. Utilize SSE/WebSockets for real-time testcase progress.
+- **PDF Viewer:** Currently a placeholder — implement using `pdf.js` or `<iframe>`.
+- **Styling:** Reuse existing CSS component classes; avoid rewriting styles from scratch.
 ---
 
-## 12. File-by-File Reference for Existing Code
+## 12. Code Style & Conventions
 
-When modifying existing files, always read them first. Here is what each key file does:
-
-| File | Purpose |
-|------|---------|
-| `src/lib/constants.ts` | Judge0 language map (ID → label + Monaco mode), starter code templates, submission status enum |
-| `src/lib/types.ts` | TypeScript types for Problem, TestCase, Profile, Submission |
-| `src/lib/judge0.ts` | `runJudge0()` helper (simple wait mode) and `mapJudge0Status()` — **Note:** `/api/grade/route.ts` has its own inline implementation with polling instead |
-| `src/lib/utils.ts` | `normalizeOutput()` for trimming whitespace, `cn()` for className merging |
-| `src/components/problem-editor.tsx` | Client component: Monaco editor + console panel + submit logic. Calls `/api/grade` |
-| `src/components/site-header.tsx` | Server component: sticky nav, auth-aware (shows login/signup or sign-out) |
-| `src/app/api/grade/route.ts` | Main grading endpoint: validates input → fetches problem + test cases → runs each through Judge0 → records submission → returns verdict |
-
----
-
-## 13. Code Style & Conventions
-
-- **Imports:** Use `@/` path alias (maps to `src/`)
-- **Components:** PascalCase filenames, named exports (not default)
-- **API routes:** Use `export async function POST(request: Request)` pattern
-- **Error handling:** Zod validation at API boundaries, try/catch for external calls (Judge0)
-- **State management:** React `useState` for local state, no global state library
+- **Imports:** `@/` path alias (maps to `src/`)
+- **Components:** PascalCase filenames, named exports
+- **API routes:** `export async function POST/GET/PATCH(request: Request)` — thin, delegates to services
+- **Error handling:** Zod at API boundaries, try/catch for external calls (Judge0)
+- **State management:** `useState` only, no global stores
 - **Data fetching in Server Components:** Call Supabase directly with `await`
-- **Data fetching in Client Components:** `fetch()` to internal API routes or `useEffect` with Supabase client
-- **No `any` types:** Use proper TypeScript types from `src/lib/types.ts`
-- **Tailwind only:** No CSS modules, no styled-components, no inline `style` props (except for CSS variable overrides)
+- **Data fetching in Client Components:** `fetch()` to API routes or `useEffect` with browser Supabase client
+- **No `any` types**
+- **Styling:** CSS variables + utility classes in `globals.css`, inline `style` props for layout

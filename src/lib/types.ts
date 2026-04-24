@@ -9,6 +9,7 @@ export type Problem = {
   difficulty: "Easy" | "Medium" | "Hard";
   points: number;
   is_published: boolean;
+  pdf_url: string | null;
   created_at: string;
 };
 

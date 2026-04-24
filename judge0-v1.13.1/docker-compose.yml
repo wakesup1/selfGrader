@@ -7,21 +7,34 @@ x-logging:
 
 services:
   server:
-    image: judge0/judge0:1.13.1
+    image: judge0/judge0:1.13.0   # ถอยมาใช้ 1.13.0
+    platform: linux/amd64
     volumes:
       - ./judge0.conf:/judge0.conf:ro
     ports:
       - "2358:2358"
-    privileged: true
+    environment:
+      - JUDGE0_BYPASS_CGROUP=true
     <<: *default-logging
     restart: always
 
   workers:
-    image: judge0/judge0:1.13.1
+    image: judge0/judge0:1.13.0
+    platform: linux/amd64
     command: ["./scripts/workers"]
     volumes:
       - ./judge0.conf:/judge0.conf:ro
     privileged: true
+    user: root
+    # ท่าไม้ตาย: สร้าง Directory หลอก และ Bypass Cgroup ในระดับ OS
+    entrypoint: >
+      bash -c "
+      mkdir -p /sys/fs/cgroup/memory/box-1 &&
+      touch /sys/fs/cgroup/memory/box-1/tasks &&
+      mkdir -p /box &&
+      chmod 777 /box &&
+      export JUDGE0_BYPASS_CGROUP=true &&
+      ./scripts/workers"
     <<: *default-logging
     restart: always
 

@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { IconMenu, IconReceipt, IconTrophyMug, IconPen, IconChart, IconCup, IconUser } from "@/components/icons";
 
 export async function SiteHeader() {
   const supabase = await createClient();
@@ -24,6 +26,7 @@ export async function SiteHeader() {
     "use server";
     const serverClient = await createClient();
     await serverClient.auth.signOut();
+    redirect("/");
   }
 
   return (
@@ -45,9 +48,8 @@ export async function SiteHeader() {
           width: 36, height: 36, borderRadius: "50%",
           background: "var(--ink)", color: "var(--bg)",
           display: "grid", placeItems: "center",
-          fontFamily: "var(--serif)", fontSize: 22, lineHeight: 1, paddingBottom: 2,
         }}>
-          n
+          <IconCup size={18} style={{ color: "var(--bg)" }} strokeWidth={1.4} />
         </div>
         <div>
           <div style={{ fontFamily: "var(--serif)", fontSize: 24, letterSpacing: "-0.02em", lineHeight: 1.15, color: "var(--ink)" }}>
@@ -61,10 +63,11 @@ export async function SiteHeader() {
 
       {/* Nav */}
       <nav style={{ display: "flex", gap: 4, marginLeft: 4 }}>
-        <NavItem href="/problems">Problems</NavItem>
-        <NavItem href="/leaderboard">Leaderboard</NavItem>
-        <NavItem href="/submissions">Submissions</NavItem>
-        {isAdmin && <NavItem href="/admin/problems" accent>Admin</NavItem>}
+        <NavItem href="/problems" icon={<IconMenu size={14} />}>Problems</NavItem>
+        <NavItem href="/leaderboard" icon={<IconTrophyMug size={14} />}>Leaderboard</NavItem>
+        <NavItem href="/submissions" icon={<IconReceipt size={14} />}>Submissions</NavItem>
+        {isAdmin && <NavItem href="/admin/problems" accent icon={<IconPen size={14} />}>Admin</NavItem>}
+        {isAdmin && <NavItem href="/admin/stats" accent icon={<IconChart size={14} />}>Stats</NavItem>}
       </nav>
 
       {/* Right */}
@@ -145,10 +148,12 @@ function NavItem({
   href,
   children,
   accent,
+  icon,
 }: {
   href: string;
   children: React.ReactNode;
   accent?: boolean;
+  icon?: React.ReactNode;
 }) {
   return (
     <Link
@@ -160,9 +165,13 @@ function NavItem({
         color: accent ? "var(--clay)" : "var(--ink-soft)",
         transition: "all 0.15s",
         fontWeight: accent ? 500 : 400,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
       }}
       className="nav-item-hover"
     >
+      {icon}
       {children}
     </Link>
   );

@@ -36,6 +36,9 @@ create table if not exists public.test_cases (
   created_at timestamptz not null default now()
 );
 
+-- PDF statement URL (nullable — null means inline markdown description is used)
+alter table public.problems add column if not exists pdf_url text;
+
 -- Keep older databases compatible with current app schema
 alter table public.profiles add column if not exists is_admin boolean not null default false;
 
@@ -177,3 +180,63 @@ with check (auth.uid() = user_id);
 create policy "stats readable"
 on public.user_problem_stats for select
 using (true);
+
+-- ── Announcements (chalkboard) ───────────────────────────────────────────────
+create table if not exists public.announcements (
+  id         bigserial primary key,
+  tag        text not null default 'Info',
+  title      text not null,
+  body       text not null default '',
+  pinned     boolean not null default false,
+  is_published boolean not null default true,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.announcements enable row level security;
+
+create policy if not exists "announcements readable"
+on public.announcements for select
+using (
+  is_published = true
+  or exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_admin = true)
+);
+
+-- keep updated_at fresh on every edit
+create or replace function public.set_announcement_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_announcement_updated_at on public.announcements;
+create trigger trg_announcement_updated_at
+before update on public.announcements
+for each row execute function public.set_announcement_updated_at();
+
+-- ── Storage: problem PDF files ──────────────────────────────────────────────
+-- Create the bucket (idempotent)
+insert into storage.buckets (id, name, public)
+values ('problem-pdfs', 'problem-pdfs', true)
+on conflict (id) do nothing;
+
+-- Anyone can read PDFs (problems are publicly visible)
+create policy if not exists "problem-pdfs public read"
+on storage.objects for select
+using (bucket_id = 'problem-pdfs');
+
+-- Only authenticated users (admin check is enforced at the API layer)
+create policy if not exists "problem-pdfs admin upload"
+on storage.objects for insert
+with check (bucket_id = 'problem-pdfs' and auth.role() = 'authenticated');
+
+create policy if not exists "problem-pdfs admin update"
+on storage.objects for update
+using (bucket_id = 'problem-pdfs' and auth.role() = 'authenticated');
+
+create policy if not exists "problem-pdfs admin delete"
+on storage.objects for delete
+using (bucket_id = 'problem-pdfs' and auth.role() = 'authenticated');
