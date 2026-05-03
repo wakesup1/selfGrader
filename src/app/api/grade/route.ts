@@ -56,9 +56,9 @@ export async function POST(request: Request) {
     .from("test_cases")
     .select("id", { count: "exact", head: true })
     .eq("problem_id", body.problemId);
-
   // 4. Grade
   try {
+    
     const result = await gradeSubmission({
       userId:     user.id,
       problemId:  body.problemId,
@@ -66,21 +66,23 @@ export async function POST(request: Request) {
       languageId: body.languageId,
     });
     return NextResponse.json(result);
-  } catch (err) {
+  } catch (err: any) {
+    console.error("DEBUG CAUSE:", err.cause); 
+    console.error("DEBUG MESSAGE:", err.message);
     const message     = err instanceof Error ? err.message : "Unknown error";
     const code        = (err as { code?: string }).code;
 
     if (code === "NOT_FOUND")    return NextResponse.json({ error: "Problem not found" },           { status: 404 });
     if (code === "NO_TEST_CASES") return NextResponse.json({ error: "No test cases for problem" }, { status: 400 });
 
-    // Judge0 offline / network error
-    console.error("[/api/grade] Judge0 error:", message);
+    // Grader offline / network error
+    console.error("[/api/grade] grader error:", message);
     await recordOfflineSubmission(
       { userId: user.id, problemId: body.problemId, code: body.code, languageId: body.languageId },
       tcCount ?? 0
     );
     return NextResponse.json(
-      { error: "Judge0 server is offline or unreachable", details: message },
+      { error: "Grader server is offline or unreachable", details: message },
       { status: 503 }
     );
   }

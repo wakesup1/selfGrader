@@ -1,0 +1,29 @@
+# Dependencies (re-installed during build)
+node_modules
+
+# Build output (rebuilt during image build)
+.next
+
+# Git & editor
+.git
+.gitignore
+.vscode
+
+# Docker files (no need to include in context)
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Local dev files
+*.local
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Bundled grader (has its own Docker context)
+cafe-grader-docker
+
+# Judge0 (replaced by cafe-grader)
+judge0-v1.13.1
+judge0.zip

@@ -6,11 +6,16 @@ import Editor from "@monaco-editor/react";
 import { JUDGE0_LANGUAGE_MAP, STARTER_CODE } from "@/lib/constants";
 import { STATUS_LABEL } from "@/lib/utils";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { IconBrewed, IconBurnt, IconSteeping, IconTimeout, IconSpilled, IconCompileErr, IconPlay } from "@/components/icons";
+import { IconBrewed, IconBurnt, IconSteeping, IconTimeout, IconSpilled, IconCompileErr, IconPlay, IconCup } from "@/components/icons";
 
 type SubmitResponse = {
-  status: string; score: number; passed: number; total: number; 
-  message?: string; results: TcState[]; // เพิ่ม results ตรงนี้
+  status: string;
+  score: number;
+  passed: number;
+  total: number;
+  results: TcState[];
+  times: (number | null)[];
+  message?: string;
 };
 
 type TcState = "pending" | "running" | "pass" | "fail";
@@ -37,12 +42,11 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
     [languageId],
   );
 
-  const animateCases = useCallback((results: TcState[]) => {
+  const animateCases = useCallback((results: TcState[], times: (number | null)[]) => {
     const total = results.length;
     const init: TcState[] = Array(total).fill("pending");
-    // Generate fake execution times once per submission so they're stable across re-renders.
-    fakeTimes.current = Array.from({ length: total }, (_, i) =>
-      `0.0${((i * 7 + 3) % 9) + 1}s`
+    fakeTimes.current = times.map((t) =>
+      t != null ? `${(t * 1000).toFixed(0)} ms` : "—"
     );
     setTcStates(init);
     setAnimating(true);
@@ -100,7 +104,7 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
           return;
         }
         if (response.status === 503) {
-          alert("Judge0 server is offline. Please try again later.");
+          alert("Grader server is offline. Please try again later.");
           return;
         }
         alert(data.message ?? "Submission failed.");
@@ -110,7 +114,7 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
       // 3. ปรับตอนเรียกใช้ใน onSubmit
       const data = (await response.json()) as SubmitResponse;
       setResult(data);
-      animateCases(data.results); // <--- ส่งข้อมูลรายข้อไป
+      animateCases(data.results, data.times);
       router.refresh();
     } catch {
       alert("Network error: unable to reach the grading server.");
@@ -231,8 +235,8 @@ export function ProblemEditor({ problemId }: { problemId: number }) {
 
         {/* Loading / grading */}
         {loading && tcStates.length === 0 && (
-          <div style={{ padding: "24px 0", textAlign: "center", color: "var(--amber-dark)", fontFamily: "var(--mono)", fontSize: 13 }}>
-            Sending to grader… ☕
+          <div style={{padding: "24px 0", textAlign: "center", color: "var(--amber-dark)", fontFamily: "var(--mono)", fontSize: 13 }}>
+            Sending to grader… 
           </div>
         )}
 

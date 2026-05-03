@@ -56,9 +56,17 @@ const STATUS_MAP: Record<number, string> = {
   14: "ERR",  // Exec Format Error
 };
 
-const MAX_POLLS       = 25;
-const POLL_DELAY_MS   = 1_000;
+const MAX_POLLS        = 30;
 const FETCH_TIMEOUT_MS = 8_000;
+
+/**
+ * Adaptive back-off delays (ms) between polls.
+ * Fast programs finish in 100–300ms — start polling at 50ms and ramp up
+ * gradually rather than hard-sleeping 1 s on every attempt.
+ * Index i → delay after the i-th pending response.
+ * Beyond the table length the last value (1 000 ms) is used.
+ */
+const POLL_DELAYS_MS = [50, 100, 150, 200, 250, 300, 400, 500, 750, 1_000];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,13 +75,16 @@ const FETCH_TIMEOUT_MS = 8_000;
 function baseUrl(): string {
   // ดึงจาก env ถ้าไม่มีให้ใช้ URL ของ RapidAPI เป็น default ไปเลย
   const url = process.env.JUDGE0_URL ?? "";
+  console.log("FINAL URL BEFORE FETCH:", url);
   return url.replace(/\/$/, "");
 }
 
 function headers(): HeadersInit {
   return {
     "Content-Type": "application/json",
-    "X-Auth-Token": process.env.AUTHN_TOKEN!, 
+    "X-Auth-Token": "nograder69", 
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "*/*",
   };
 }
 
@@ -140,7 +151,8 @@ export async function pollResult(token: string): Promise<Judge0Result> {
 
     if (!PENDING_IDS.has(result.status.id)) return decodeResult(result);
 
-    await sleep(POLL_DELAY_MS);
+    const delay = POLL_DELAYS_MS[Math.min(i, POLL_DELAYS_MS.length - 1)];
+    await sleep(delay);
   }
 
   throw new Error("Judge0 polling timed out after maximum attempts");

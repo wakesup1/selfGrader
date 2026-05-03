@@ -10,6 +10,7 @@ export type Problem = {
   points: number;
   is_published: boolean;
   pdf_url: string | null;
+  cafe_grader_problem_id: number | null;
   created_at: string;
 };
 

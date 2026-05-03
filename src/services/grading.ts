@@ -1,13 +1,21 @@
 /**
- * Grading service — orchestrates Judge0 execution across all test cases
- * for a problem and persists the result to Supabase.
+ * Grading service — orchestrates cafe-grader execution for a problem and
+ * persists the result to Supabase.
  *
- * This module is server-only.  It is called by the /api/grade route handler
- * and (optionally) the gradeSubmission Server Action.
+ * Flow:
+ *   1. Fetch problem + test-case count from Supabase
+ *   2. If cafe_grader_problem_id is missing, sync the problem lazily
+ *   3. Submit code to cafe-grader via HTTP
+ *   4. Poll until the submission reaches a terminal status
+ *   5. Map evaluations to NoGrader verdict/results/times
+ *   6. Persist submission row; return GradeResult
+ *
+ * Server-side only.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { submitCode, pollResult, mapVerdict } from "@/services/judge0";
+import { submitCode, pollResult, mapVerdict, buildResultArrays } from "@/services/cafeGrader";
+import { syncProblemToCafeGrader } from "@/services/cafeGraderSync";
 import type { Problem, TestCase } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -15,18 +23,20 @@ import type { Problem, TestCase } from "@/lib/types";
 // ---------------------------------------------------------------------------
 
 export type GradeRequest = {
-  userId: string;
-  problemId: number;
-  code: string;
+  userId:     string;
+  problemId:  number;
+  code:       string;
   languageId: number;
 };
 
 export type GradeResult = {
-  status: string;
-  score: number;
-  passed: number;
-  total: number;
-  results: ("pass" | "fail")[];
+  status:   string;
+  score:    number;
+  passed:   number;
+  total:    number;
+  results:  ("pass" | "fail")[];
+  /** Execution time in seconds per test case (null if CE/no execution). */
+  times:    (number | null)[];
   message?: string;
 };
 
@@ -37,84 +47,103 @@ export type GradeResult = {
 export async function gradeSubmission(req: GradeRequest): Promise<GradeResult> {
   const admin = createAdminClient();
 
+  // -------------------------------------------------------------------------
+  // 1. Fetch problem and test-case count in parallel
+  // -------------------------------------------------------------------------
   const [
     { data: problem, error: problemError },
-    { data: testCases, error: testCaseError },
+    { count: tcCount },
   ] = await Promise.all([
     admin
       .from("problems")
-      .select("id, points, time_limit, memory_limit")
+      .select("id, title, slug, points, time_limit, memory_limit, cafe_grader_problem_id")
       .eq("id", req.problemId)
-      .single<Pick<Problem, "id" | "points" | "time_limit" | "memory_limit">>(),
+      .single<
+        Pick<Problem, "id" | "title" | "slug" | "points" | "time_limit" | "memory_limit" | "cafe_grader_problem_id">
+      >(),
     admin
       .from("test_cases")
-      .select("id, input, expected_output")
-      .eq("problem_id", req.problemId)
-      .order("id", { ascending: true })
-      .returns<Pick<TestCase, "id" | "input" | "expected_output">[]>(),
+      .select("id", { count: "exact", head: true })
+      .eq("problem_id", req.problemId),
   ]);
 
   if (problemError || !problem) {
     throw Object.assign(new Error("Problem not found"), { code: "NOT_FOUND" });
   }
-  if (testCaseError || !testCases || testCases.length === 0) {
+  if (!tcCount || tcCount === 0) {
     throw Object.assign(new Error("No test cases configured"), { code: "NO_TEST_CASES" });
   }
 
-  let passed         = 0;
-  let finalVerdict   = "AC";
-  let maxTimeMs      = 0;
-  let maxMemoryKb    = 0;
-  let firstFailureMsg = "";
-  
-  // ✅ 1. เพิ่มตัวแปรเก็บผลรายข้อสำหรับส่งให้ Frontend
-  const resultsDetail: ("pass" | "fail")[] = [];
+  // -------------------------------------------------------------------------
+  // 2. Lazy sync — if the problem hasn't been pushed to cafe-grader yet
+  // -------------------------------------------------------------------------
+  let cafeGraderProblemId = problem.cafe_grader_problem_id;
 
-  for (const tc of testCases) {
-    const token = await submitCode({
-      source_code:    req.code,
-      language_id:    req.languageId,
-      stdin:          tc.input,
-      cpu_time_limit: problem.time_limit,
-      memory_limit:   problem.memory_limit * 1024,
+  if (!cafeGraderProblemId) {
+    const { data: testCases } = await admin
+      .from("test_cases")
+      .select("input, expected_output")
+      .eq("problem_id", req.problemId)
+      .order("id", { ascending: true })
+      .returns<Pick<TestCase, "input" | "expected_output">[]>();
+
+    cafeGraderProblemId = await syncProblemToCafeGrader({
+      supabaseProblemId:            problem.id,
+      existingCafeGraderProblemId:  null,
+      slug:        problem.slug,
+      title:       problem.title,
+      timeLimit:   problem.time_limit,
+      memoryLimit: problem.memory_limit,
+      testCases:   testCases ?? [],
     });
-
-    const result = await pollResult(token);
-    
-    maxTimeMs   = Math.max(maxTimeMs,   Number(result.time   ?? 0));
-    maxMemoryKb = Math.max(maxMemoryKb, Number(result.memory ?? 0));
-    
-    const tcVerdict = mapVerdict(result);
-
-    // กรณีที่ Judge0 พ่น Error (TLE, RE, CE)
-    if (tcVerdict !== "AC") {
-      if (finalVerdict === "AC") { 
-        finalVerdict = tcVerdict;
-        firstFailureMsg = result.compile_output ?? result.stderr ?? result.status.description;
-      }
-      resultsDetail.push("fail"); // ✅ บันทึกว่าข้อนี้ไม่ผ่าน
-      continue;
-    }
-
-    // stdout is already decoded to plain text by pollResult() in judge0.ts.
-    const cleanActual   = (result.stdout ?? "").replace(/\r\n/g, "\n").trim();
-    const cleanExpected = tc.expected_output.replace(/\r\n/g, "\n").trim();
-
-    if (cleanActual === cleanExpected) {
-      passed++;
-      resultsDetail.push("pass"); // ✅ บันทึกว่าข้อนี้ผ่านจริง
-    } else {
-      if (finalVerdict === "AC") {
-        finalVerdict = "WA";
-      }
-      resultsDetail.push("fail"); // ✅ บันทึกว่าข้อนี้คำตอบผิด
-    }
   }
 
-  const total = testCases.length;
-  const score = Math.round((problem.points * passed) / total);
+  // -------------------------------------------------------------------------
+  // 3. Submit to cafe-grader
+  // -------------------------------------------------------------------------
+  const cafeSubmissionId = await submitCode(cafeGraderProblemId, req.code, req.languageId);
 
-  // บันทึกลง DB (เหมือนเดิม)
+  // -------------------------------------------------------------------------
+  // 4. Poll until done
+  // -------------------------------------------------------------------------
+  const cafeSubmission = await pollResult(cafeSubmissionId);
+
+  // -------------------------------------------------------------------------
+  // 5. Map verdict + build per-TC arrays
+  // -------------------------------------------------------------------------
+  const finalVerdict = mapVerdict(cafeSubmission);
+
+  let results:    ("pass" | "fail")[] = [];
+  let times:      (number | null)[]   = [];
+  let maxTimeSec  = 0;
+  let maxMemoryKb = 0;
+  let message:    string | undefined;
+
+  if (finalVerdict === "CE") {
+    // Compilation error — no evaluations; pad results with "fail"
+    results = Array(tcCount).fill("fail");
+    times   = Array(tcCount).fill(null);
+    message = cafeSubmission.compiler_message ?? undefined;
+  } else if (finalVerdict === "ERR") {
+    results = Array(tcCount).fill("fail");
+    times   = Array(tcCount).fill(null);
+    message = cafeSubmission.grader_comment ?? undefined;
+  } else {
+    ({ results, times, maxTimeSec, maxMemoryKb } = buildResultArrays(cafeSubmission));
+    // If cafe-grader reported grader_error but evaluations exist, the grading
+    // actually succeeded — suppress the internal error comment from the UI.
+    message = cafeSubmission.status === "grader_error"
+      ? undefined
+      : (cafeSubmission.grader_comment ?? undefined);
+  }
+
+  const passed = results.filter((r) => r === "pass").length;
+  const total  = tcCount;
+  const score  = Math.round((problem.points * passed) / total);
+
+  // -------------------------------------------------------------------------
+  // 6. Persist to Supabase
+  // -------------------------------------------------------------------------
   await admin.from("submissions").insert({
     user_id:        req.userId,
     problem_id:     req.problemId,
@@ -124,36 +153,28 @@ export async function gradeSubmission(req: GradeRequest): Promise<GradeResult> {
     score,
     passed_count:   passed,
     total_count:    total,
-    execution_time: maxTimeMs   || null,
-    memory:         maxMemoryKb || null,
+    execution_time: maxTimeSec  || null,
+    memory:         Math.round(maxMemoryKb) || null,
   });
 
-  // ✅ 2. ส่ง results กลับไปให้ Frontend ด้วย
-  return {
-    status:  finalVerdict,
-    score,
-    passed,
-    total,
-    results: resultsDetail, // <--- ตัวนี้สำคัญมาก!
-    message: firstFailureMsg || undefined,
-  };
+  return { status: finalVerdict, score, passed, total, results, times, message };
 }
 
-/**
- * Record an offline/failed submission without running any test cases.
- * Called when Judge0 is unreachable so the attempt is still logged.
- */
+// ---------------------------------------------------------------------------
+// Offline fallback — called when cafe-grader is unreachable
+// ---------------------------------------------------------------------------
+
 export async function recordOfflineSubmission(
   req: GradeRequest,
   totalCount: number
-) {
+): Promise<void> {
   const admin = createAdminClient();
   await admin.from("submissions").insert({
     user_id:        req.userId,
     problem_id:     req.problemId,
     code:           req.code,
     language_id:    req.languageId,
-    status:         "JUDGE0_OFFLINE",
+    status:         "GRADER_OFFLINE",
     score:          0,
     passed_count:   0,
     total_count:    totalCount,

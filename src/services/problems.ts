@@ -2,11 +2,15 @@
  * Problems service — admin-level CRUD for problems and test cases.
  *
  * All writes use the admin Supabase client (service-role key, bypasses RLS).
- * Callers MUST verify is_admin before calling any mutating function.
+ * After each create/update the problem is synced to cafe-grader's MySQL so
+ * that submissions can be graded immediately.
+ *
+ * Callers MUST verify isAdmin() before calling any mutating function.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createSlug } from "@/lib/utils";
+import { syncProblemToCafeGrader } from "@/services/cafeGraderSync";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,19 +45,20 @@ export type UpdateProblemInput = Omit<CreateProblemInput, "createdBy"> & {
 
 export async function createProblem(input: CreateProblemInput): Promise<number> {
   const admin = createAdminClient();
+  const slug  = createSlug(input.title);
 
   const { data: problem, error: problemError } = await admin
     .from("problems")
     .insert({
-      title:       input.title,
-      slug:        createSlug(input.title),
-      description: input.description,
-      constraints: input.constraints,
-      difficulty:  input.difficulty,
-      points:      input.points,
-      time_limit:  input.time_limit,
+      title:        input.title,
+      slug,
+      description:  input.description,
+      constraints:  input.constraints,
+      difficulty:   input.difficulty,
+      points:       input.points,
+      time_limit:   input.time_limit,
       memory_limit: input.memory_limit,
-      created_by:  input.createdBy,
+      created_by:   input.createdBy,
     })
     .select("id")
     .single<{ id: number }>();
@@ -73,6 +78,21 @@ export async function createProblem(input: CreateProblemInput): Promise<number> 
 
   if (tcError) throw new Error(tcError.message);
 
+  // Sync to cafe-grader (best-effort — don't fail the create if sync errors)
+  try {
+    await syncProblemToCafeGrader({
+      supabaseProblemId:            problem.id,
+      existingCafeGraderProblemId:  null,
+      slug,
+      title:       input.title,
+      timeLimit:   input.time_limit,
+      memoryLimit: input.memory_limit,
+      testCases:   input.testCases,
+    });
+  } catch (err) {
+    console.error("[problems] cafe-grader sync failed for new problem", problem.id, err);
+  }
+
   return problem.id;
 }
 
@@ -86,8 +106,14 @@ export async function updateProblem(
 ): Promise<void> {
   const admin = createAdminClient();
 
-  // Run the problem update and test-case wipe in parallel; insert must
-  // follow the delete to avoid FK conflicts.
+  // Fetch existing slug and cafe_grader_problem_id before mutating
+  const { data: existing } = await admin
+    .from("problems")
+    .select("slug, cafe_grader_problem_id")
+    .eq("id", problemId)
+    .single<{ slug: string; cafe_grader_problem_id: number | null }>();
+
+  // Run problem update and test-case wipe in parallel; insert must follow delete.
   const [{ error: updateError }, { error: deleteError }] = await Promise.all([
     admin
       .from("problems")
@@ -118,16 +144,27 @@ export async function updateProblem(
   );
 
   if (insertError) throw new Error(insertError.message);
+
+  // Sync to cafe-grader (best-effort)
+  try {
+    await syncProblemToCafeGrader({
+      supabaseProblemId:            problemId,
+      existingCafeGraderProblemId:  existing?.cafe_grader_problem_id ?? null,
+      slug:        existing?.slug ?? createSlug(input.title),
+      title:       input.title,
+      timeLimit:   input.time_limit,
+      memoryLimit: input.memory_limit,
+      testCases:   input.testCases,
+    });
+  } catch (err) {
+    console.error("[problems] cafe-grader sync failed for problem", problemId, err);
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Auth guard helper (shared by both admin route handlers)
+// Auth guard helper
 // ---------------------------------------------------------------------------
 
-/**
- * Returns true if the given user ID belongs to an admin.
- * Uses the admin client so this check is never blocked by RLS.
- */
 export async function isAdmin(userId: string): Promise<boolean> {
   const admin = createAdminClient();
   const { data } = await admin

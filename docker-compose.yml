@@ -1,0 +1,155 @@
+services:
+
+  # ── NoGrader (Next.js) ──────────────────────────────────────────────────────
+  nograder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # NEXT_PUBLIC_* vars must be baked into the client bundle at build time.
+      # docker-compose reads them from the .env file automatically.
+      args:
+        NEXT_PUBLIC_SUPABASE_URL:    ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_SITE_URL:        ${NEXT_PUBLIC_SITE_URL}
+        NEXT_PUBLIC_JUDGE0_URL:      ${NEXT_PUBLIC_JUDGE0_URL:-}
+    container_name: nograder
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # ── Supabase (server-side only) ──
+      SUPABASE_SERVICE_ROLE_KEY:   ${SUPABASE_SERVICE_ROLE_KEY}
+      # ── Rate limiting ──
+      UPSTASH_REDIS_REST_URL:      ${UPSTASH_REDIS_REST_URL}
+      UPSTASH_REDIS_REST_TOKEN:    ${UPSTASH_REDIS_REST_TOKEN}
+      # ── grader HTTP API (internal Docker hostname) ──
+      CAFE_GRADER_URL:             http://nograder-grader-web:3000
+      CAFE_GRADER_ADMIN_LOGIN:     root
+      CAFE_GRADER_ADMIN_PASSWORD:  ioionrails
+      # ── grader MySQL (internal Docker hostname) ──
+      CAFE_GRADER_MYSQL_HOST:      nograder-grader-db
+      CAFE_GRADER_MYSQL_PORT:      3306
+      CAFE_GRADER_MYSQL_USER:      grader_user
+      CAFE_GRADER_MYSQL_PASSWORD:  ${CAFE_GRADER_MYSQL_PASSWORD}
+      CAFE_GRADER_MYSQL_DB:        grader
+      # ── grader Active Storage path (shared volume, written by sync, read by Rails) ──
+      CAFE_GRADER_STORAGE_PATH:    /grader-storage
+    volumes:
+      # Share the same storage volume as nograder-grader-web so Node.js can write
+      # Active Storage blob files that Rails will serve via /worker/get_attachment/:id
+      - nograder-grader-storage:/grader-storage
+    depends_on:
+      nograder-grader-web:
+        condition: service_healthy
+    networks:
+      - nograder-net
+
+  # ── Grader Rails web (HTTP API + admin UI) ──────────────────────────────────
+  nograder-grader-web:
+    build:
+      context:    ./cafe-grader-docker
+      dockerfile: Dockerfile
+      target:     web
+    image: nograder-grader-web:latest
+    container_name: nograder-grader-web
+    restart: unless-stopped
+    # Port is NOT exposed to the host — nograder reaches it via Docker network
+    expose:
+      - "3000"
+    environment:
+      RAILS_ENV:                    production
+      RAILS_TIME_ZONE:              Asia/Bangkok
+      MYSQL_USER:                   grader_user
+      MYSQL_PASSWORD:               ${CAFE_GRADER_MYSQL_PASSWORD}
+      SQL_DATABASE_CONTAINER_HOST:  nograder-grader-db
+      SQL_DATABASE_PORT:            3306
+      SECRET_KEY_BASE:              ${CAFE_GRADER_SECRET_KEY_BASE}
+    volumes:
+      - nograder-grader-storage:/cafe-grader/web/storage
+      - nograder-grader-cache:/cafe-grader/judge
+    command: >
+      bash -lc "
+        cd /cafe-grader/web
+        rails db:create   RAILS_ENV=production
+        rails db:migrate  RAILS_ENV=production
+        rails db:seed     RAILS_ENV=production
+        rails assets:precompile RAILS_ENV=production
+        rails server -b 0.0.0.0
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/"]
+      interval: 15s
+      timeout:  10s
+      retries:  20
+      start_period: 180s   # generous: migrations + seeds + asset precompile
+    depends_on:
+      nograder-grader-db:
+        condition: service_healthy
+    networks:
+      - nograder-net
+
+  # ── Grader worker (IOI Isolate grading engine) ───────────────────────────────
+  nograder-grader-worker:
+    build:
+      context:    ./cafe-grader-docker
+      dockerfile: Dockerfile
+      target:     worker
+    image: nograder-grader-worker:latest
+    container_name: nograder-grader-worker
+    restart: unless-stopped
+    privileged: true   # required for IOI Isolate sandboxing
+    tty: true
+    environment:
+      RAILS_ENV:                    production
+      RAILS_TIME_ZONE:              Asia/Bangkok
+      MYSQL_USER:                   root
+      MYSQL_PASSWORD:               ${CAFE_GRADER_MYSQL_ROOT_PASSWORD}
+      SQL_DATABASE_CONTAINER_HOST:  nograder-grader-db
+      SQL_DATABASE_PORT:            3306
+      SECRET_KEY_BASE:              ${CAFE_GRADER_SECRET_KEY_BASE}
+      PYTHON_PACKAGES:              ${CAFE_GRADER_PYTHON_PACKAGES:-}
+      GRADER_PROCESSES:             ${CAFE_GRADER_PROCESSES:-2}
+    volumes:
+      - nograder-grader-cache:/cafe-grader/judge
+    depends_on:
+      nograder-grader-db:
+        condition: service_healthy
+      nograder-grader-web:
+        condition: service_healthy
+    networks:
+      - nograder-net
+
+  # ── MySQL (shared between grader-web and grader-worker) ─────────────────────
+  nograder-grader-db:
+    image: mysql:8.0
+    container_name: nograder-grader-db
+    restart: unless-stopped
+    # Not exposed to the host — only reachable within nograder-net
+    environment:
+      MYSQL_ROOT_PASSWORD: ${CAFE_GRADER_MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE:      grader
+      MYSQL_USER:          grader_user
+      MYSQL_PASSWORD:      ${CAFE_GRADER_MYSQL_PASSWORD}
+    volumes:
+      - nograder-grader-db:/var/lib/mysql
+      - ./cafe-grader-docker/scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost",
+             "-u", "grader_user", "--password=${CAFE_GRADER_MYSQL_PASSWORD}"]
+      interval:     5s
+      timeout:      20s
+      retries:      10
+      start_period: 30s
+    networks:
+      - nograder-net
+
+# ── Networks ────────────────────────────────────────────────────────────────
+networks:
+  nograder-net:
+    driver: bridge
+
+# ── Volumes ─────────────────────────────────────────────────────────────────
+volumes:
+  nograder-grader-db:       # MySQL data
+  nograder-grader-storage:  # Rails Active Storage (problem attachments etc.)
+  nograder-grader-cache:    # IOI Isolate sandbox cache (shared web ↔ worker)

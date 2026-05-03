@@ -1,8 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   // Allow dev-mode internal resource access from the tunnel domain
-  allowedDevOrigins: ['web.nograder.dev'],
+  allowedDevOrigins: ['web.nograder.dev', '10.203.169.184'],
 
   // Allow Server Actions (signOut, etc.) from the production domain via Cloudflare Tunnel.
   // Without this, Next.js CSRF check compares origin vs x-forwarded-host and blocks the action.

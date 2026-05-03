@@ -69,11 +69,11 @@ export function DashboardHero({
             </>
           ) : (
             <>
-              <StatItem label="Judge"   value="Judge0" hint="Self-hosted" />
+              <StatItem label="Grader"    value="Cafe" hint="Self-hosted" />
               <Divider />
-              <StatItem label="Languages" value="3" hint="C++ · Python · Java" />
+              <StatItem label="Languages" value="3"    hint="C++ · Python · Java" />
               <Divider />
-              <StatItem label="Status"  value="Open" hint="Brewing since 2024" />
+              <StatItem label="Status"    value="Open" hint="Brewing since 2024" />
             </>
           )}
         </div>

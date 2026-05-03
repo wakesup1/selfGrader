@@ -38,11 +38,12 @@ export function statusBadgeClass(status: string): string {
 }
 
 export const STATUS_LABEL: Record<string, string> = {
-  AC:             "Accepted",
-  WA:             "Wrong Answer",
-  TLE:            "Time Limit Exceeded",
-  CE:             "Compilation Error",
-  RE:             "Runtime Error",
+  AC:             "Brewed",
+  WA:             "Burnt",
+  TLE:            "Timed Out",
+  CE:             "Compile Error",
+  RE:             "Crashed",
   ERR:            "Error",
-  JUDGE0_OFFLINE: "Judge Offline",
+  GRADER_OFFLINE: "Grader Offline",
+  JUDGE0_OFFLINE: "Grader Offline",
 };
